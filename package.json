@@ -1,0 +1,31 @@
+{
+  "name": "aktar",
+  "version": "0.1.0",
+  "description": "Upload files to your own S3, R2 or B2 bucket from the terminal through the Aktar app, and get the link.",
+  "keywords": ["s3", "r2", "cloudflare-r2", "backblaze-b2", "minio", "upload", "cli", "typora", "aktar"],
+  "homepage": "https://getaktar.com",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/getaktar/cli.git"
+  },
+  "bugs": "https://github.com/getaktar/cli/issues",
+  "license": "MIT",
+  "author": "Mert Topuz",
+  "type": "module",
+  "bin": {
+    "aktar": "dist/src/cli.js"
+  },
+  "files": ["dist/src", "README.md", "CHANGELOG.md", "LICENSE"],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "tsc && node --test \"dist/test/**/*.test.js\"",
+    "prepublishOnly": "npm test"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0"
+  }
+}
