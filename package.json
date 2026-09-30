@@ -1,9 +1,9 @@
 {
   "name": "@getaktar/cli",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Upload files to your own S3, R2 or B2 bucket from the terminal through the Aktar app, and get the link.",
   "keywords": ["s3", "r2", "cloudflare-r2", "backblaze-b2", "minio", "upload", "cli", "typora", "aktar"],
-  "homepage": "https://getaktar.com",
+  "homepage": "https://getaktar.com/cli/",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/getaktar/cli.git"

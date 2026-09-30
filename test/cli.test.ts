@@ -207,7 +207,7 @@ describe("listing", () => {
 
   test("--help and --version", async () => {
     assert.match((await cli(["--help"])).out, /aktar upload <file>/);
-    assert.equal((await cli(["--version"])).out, "0.1.0\n");
+    assert.equal((await cli(["--version"])).out, "0.1.1\n");
     assert.equal((await cli([])).code, 2);
   });
 });

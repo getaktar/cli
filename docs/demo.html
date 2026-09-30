@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>aktar demo</title>
+<!-- Source for docs/demo.png (rendered at 1200x680, 2x). -->
+<style>
+  :root {
+    --primary: #125efe;
+    --cyan: #0ab0ff;
+    --indigo: #2100e6;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    width: 1200px;
+    height: 680px;
+    display: grid;
+    place-items: center;
+    background:
+      radial-gradient(60% 80% at 100% 0%, rgba(10, 176, 255, 0.55), transparent 60%),
+      radial-gradient(60% 80% at 0% 100%, rgba(33, 0, 230, 0.6), transparent 60%),
+      var(--primary);
+    font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
+  }
+  .window {
+    width: 1040px;
+    border-radius: 16px;
+    background: #0b1026;
+    box-shadow: 0 40px 80px rgba(5, 10, 40, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.08);
+    overflow: hidden;
+  }
+  .bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 44px;
+    padding: 0 16px;
+    background: #141a36;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  }
+  .dot { width: 12px; height: 12px; border-radius: 50%; }
+  .title {
+    flex: 1;
+    margin-right: 52px;
+    text-align: center;
+    color: #8b93b8;
+    font: 500 13px -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+  }
+  pre {
+    margin: 0;
+    padding: 26px 30px 30px;
+    color: #d7deff;
+    font: 17px/1.75 ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
+    white-space: pre;
+  }
+  .p { color: #5ee0a0; }
+  .c { color: #ffffff; font-weight: 600; }
+  .f { color: #8fb4ff; }
+  .u { color: #7fd3ff; }
+  .k { color: #b8a6ff; }
+  .s { color: #7fd3ff; }
+  .m { color: #6e76a0; }
+</style>
+</head>
+<body>
+  <div class="window">
+    <div class="bar">
+      <span class="dot" style="background:#ff5f57"></span>
+      <span class="dot" style="background:#febc2e"></span>
+      <span class="dot" style="background:#28c840"></span>
+      <span class="title">~/projects/site</span>
+    </div>
+<pre><span class="p">$</span> <span class="c">aktar upload</span> screenshot.png report.pdf
+<span class="u">https://files.example.com/2026/09/7f3c2a91.png</span>
+<span class="u">https://files.example.com/2026/09/b41e09d2.pdf</span>
+
+<span class="p">$</span> <span class="c">aktar upload</span> diagram.png <span class="f">--format markdown</span>
+![diagram.png](<span class="u">https://files.example.com/2026/09/c2d81f44.png</span>)
+
+<span class="p">$</span> <span class="c">aktar upload</span> build.zip <span class="f">-d Builds --expires 7 --json</span>
+[{ <span class="k">"filename"</span>: <span class="s">"build.zip"</span>, <span class="k">"url"</span>: <span class="s">"https://builds.example.com/tmp/7d/2026/09/9ae1.zip"</span>,
+   <span class="k">"destinationName"</span>: <span class="s">"Builds"</span>, <span class="k">"expiresAt"</span>: <span class="s">"2026-10-07T12:00:00Z"</span>, <span class="m">…</span> }]
+</pre>
+  </div>
+</body>
+</html>

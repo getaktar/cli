@@ -1,6 +1,22 @@
-# Aktar CLI
+<p align="center">
+  <img src="https://raw.githubusercontent.com/getaktar/cli/main/docs/logo.png" alt="Aktar" width="96" height="96">
+</p>
 
-Upload files to your own S3-compatible storage from the terminal and get the link back. The `aktar` command talks to the [Aktar](https://getaktar.com) app on your Mac or Windows PC, so it uses the destinations, keys, path templates and link settings you already set up there. Your storage keys never leave the app.
+<h1 align="center">Aktar CLI</h1>
+
+<p align="center">
+  Upload files to your own S3, Cloudflare R2 or Backblaze B2 bucket from the terminal, and get the link.
+</p>
+
+<p align="center">
+  <a href="https://www.npmjs.com/package/@getaktar/cli"><img src="https://img.shields.io/npm/v/@getaktar/cli?color=125efe" alt="npm version"></a>
+  <a href="https://github.com/getaktar/cli/actions/workflows/ci.yml"><img src="https://github.com/getaktar/cli/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/getaktar/cli/blob/main/LICENSE"><img src="https://img.shields.io/npm/l/@getaktar/cli?color=125efe" alt="MIT license"></a>
+</p>
+
+![aktar upload in a terminal: links, Markdown and JSON output](https://raw.githubusercontent.com/getaktar/cli/main/docs/demo.png)
+
+The `aktar` command talks to the [Aktar](https://getaktar.com) app on your Mac or Windows PC, so it uses the destinations, keys, path templates and link settings you already set up there. Your storage keys never leave the app.
 
 ```bash
 $ aktar upload screenshot.png
@@ -11,6 +27,8 @@ https://files.example.com/2026/09/7f3c2a91.png
 
 ```bash
 npm install -g @getaktar/cli
+# or
+brew install getaktar/tap/aktar-cli
 ```
 
 Or run it without installing: `npx @getaktar/cli upload file.png`.
@@ -89,6 +107,12 @@ aktar upload
 ```
 
 Typora passes the image paths and reads one link per line. Click **Test Uploader** to check it.
+
+## Links
+
+- Website: https://getaktar.com/cli/
+- Aktar for Mac and Windows: https://getaktar.com
+- Homebrew: `brew install getaktar/tap/aktar-cli`
 
 ## License
 

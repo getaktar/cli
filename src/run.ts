@@ -4,7 +4,7 @@ import { parseArgs } from "node:util";
 import { AktarError, Client, DEFAULT_PORT, type Destination, type OutputFormat, type Upload } from "./api.js";
 import { configPath, loadConnection, parsePort, removeConnection, saveConnection } from "./config.js";
 
-export const VERSION = "0.1.0";
+export const VERSION = "0.1.1";
 
 /** What `run` talks to, so tests can pass their own. */
 export type IO = {
