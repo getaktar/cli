@@ -10,8 +10,10 @@ https://files.example.com/2026/09/7f3c2a91.png
 ## Install
 
 ```bash
-npm install -g aktar
+npm install -g @getaktar/cli
 ```
+
+Or run it without installing: `npx @getaktar/cli upload file.png`.
 
 Requires Node.js 18 or later and Aktar for Mac 0.4.0 or later, or Aktar for Windows.
 
