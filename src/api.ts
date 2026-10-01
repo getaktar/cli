@@ -44,7 +44,17 @@ export type Upload = {
   createdAt: string;
   expiresAt?: string | null;
   formats: Record<OutputFormat, string>;
+  /** Nothing was uploaded: the same file was already there, so Aktar reused its link. */
+  reused?: boolean;
 };
+
+/** Mac puts `reused` in the upload, Windows next to it. */
+type UploadReply = { upload: Upload; reused?: boolean };
+
+function withReused({ upload, reused }: UploadReply): Upload {
+  const value = upload.reused ?? reused;
+  return value === undefined ? upload : { ...upload, reused: value };
+}
 
 export type ErrorKind =
   /** Nothing is listening: Aktar isn't running, or its local API is off. */
@@ -88,23 +98,31 @@ export class Client {
   /**
    * Without a `prefix`, Aktar names the file with the destination's path
    * template, like a drop on the menu bar. With one, the file keeps its
-   * name inside that folder. `expires` is in days; leaving it out keeps
-   * the file, whatever Aktar's menu bar is set to.
+   * name inside that folder. `filename` (the file's own by default) is the
+   * name Aktar goes by: {filename} and {ext} in the template, and history.
+   * `expires` is in days; leaving it out keeps the file, whatever Aktar's
+   * menu bar is set to.
    */
   async uploadFile(
     filePath: string,
-    options: { destinationId?: string; prefix?: string; expires?: number; onProgress?: (fraction: number) => void } = {},
+    options: {
+      filename?: string;
+      destinationId?: string;
+      prefix?: string;
+      expires?: number;
+      onProgress?: (fraction: number) => void;
+    } = {},
   ) {
-    const { onProgress, ...query } = options;
-    const response = await this.request<{ upload: Upload }>("POST", "uploads", {
-      query: { filename: path.basename(filePath), ...query },
+    const { onProgress, filename, ...query } = options;
+    const response = await this.request<UploadReply>("POST", "uploads", {
+      query: { filename: filename ?? path.basename(filePath), ...query },
       file: { path: filePath, onProgress },
     });
-    return response.upload;
+    return withReused(response);
   }
 
   async uploadClipboard(options: { destinationId?: string; expires?: number } = {}) {
-    return (await this.request<{ upload: Upload }>("POST", "uploads/clipboard", { query: options })).upload;
+    return withReused(await this.request<UploadReply>("POST", "uploads/clipboard", { query: options }));
   }
 
   private async request<T>(method: string, route: string, options: RequestOptions = {}): Promise<T> {
@@ -135,7 +153,8 @@ export class Client {
           method,
           path: `/v1/${route}${query ? `?${query}` : ""}`,
           headers,
-          // An upload takes as long as the storage provider needs.
+          // An upload takes as long as the storage provider needs. The file
+          // is streamed, never read into memory, whatever its size.
           timeout: options.file ? 0 : REQUEST_TIMEOUT_MS,
         },
         (res) => {

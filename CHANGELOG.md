@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-01
+
+### Added
+
+- `aktar upload --name <name>`: upload a single file under another name,
+  which is what the destination's path template and Aktar's history use.
+  The file's extension is added if the name has none. Works with `--folder`
+- `aktar upload --qr`: prints a QR code of each link under it, drawn in the
+  terminal black on white whatever its theme
+- `aktar qr <text>`: the QR code of a link or any text, or of an upload's
+  link given its ID from `aktar history`. `--png <file>` saves it as a PNG
+- When Aktar reuses the link of a file that's already in the bucket instead
+  of uploading it again (Aktar for Mac 0.10.0, Windows 0.3.0), `aktar` says
+  so on stderr, and `--json` has `"reused": true`
+
+### Changed
+
+- The README explains what Aktar handles per destination without any
+  options: WebP and AVIF images, `{md5}` and `{sha256}` in path templates,
+  and multipart uploads with resume for files past 5 GB
+
 ## [0.1.1] - 2026-09-30
 
 ### Changed

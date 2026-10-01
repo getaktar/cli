@@ -1,10 +1,12 @@
-import { access } from "node:fs/promises";
+import { access, writeFile } from "node:fs/promises";
+import path from "node:path";
 import { createInterface } from "node:readline";
 import { parseArgs } from "node:util";
 import { AktarError, Client, DEFAULT_PORT, type Destination, type OutputFormat, type Upload } from "./api.js";
 import { configPath, loadConnection, parsePort, removeConnection, saveConnection } from "./config.js";
+import { encodeQR, qrPNG, qrText } from "./qr.js";
 
-export const VERSION = "0.1.1";
+export const VERSION = "0.2.0";
 
 /** What `run` talks to, so tests can pass their own. */
 export type IO = {
@@ -21,12 +23,14 @@ class UsageError extends Error {}
 
 const FORMATS: OutputFormat[] = ["url", "markdown", "html", "custom"];
 const EXPIRY_DAYS = [0, 1, 7, 14, 30];
+const UPLOAD_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const HELP = `aktar ${VERSION}: upload files to your own storage through the Aktar app
 
 Usage:
   aktar upload <file>... [options]   Upload files and print their links
   aktar upload --clipboard           Upload the file or image on the clipboard
+  aktar qr <link|text|upload-id>     Show a QR code (an upload ID from history shows its link)
   aktar login [--token <token>]      Save the token from Aktar's Settings > Integrations
   aktar logout                       Forget the saved token
   aktar status                       Check the connection to Aktar
@@ -36,9 +40,14 @@ Usage:
 Upload options:
   -d, --destination <name|id>  Destination to upload to (default: the one selected in Aktar)
   -f, --format <format>        url (default), markdown, html or custom (your template in Aktar)
+      --name <name>            Upload one file under this name (keeps its extension if <name> has none)
       --folder <path>          Keep the file name and upload into this folder
       --expires <days>         Delete after 1, 7, 14 or 30 days (needs Aktar's auto-delete rules)
+      --qr                     Also print a QR code of each link
       --clipboard              Upload what's on the clipboard instead of files
+
+QR options:
+      --png <file>             Save the QR code as a PNG instead of printing it
 
 Other options:
   -n, --limit <n>              Uploads to list with history (default 20)
@@ -62,8 +71,11 @@ export async function run(argv: string[], io: IO): Promise<number> {
       options: {
         destination: { type: "string", short: "d" },
         format: { type: "string", short: "f" },
+        name: { type: "string" },
         folder: { type: "string" },
         expires: { type: "string" },
+        qr: { type: "boolean" },
+        png: { type: "string" },
         clipboard: { type: "boolean" },
         limit: { type: "string", short: "n" },
         json: { type: "boolean" },
@@ -94,6 +106,8 @@ export async function run(argv: string[], io: IO): Promise<number> {
     switch (command) {
       case "upload":
         return await upload(args, options, io, out, err);
+      case "qr":
+        return await qr(args, options, io, out);
       case "login":
         return await login(options, io, out, err);
       case "logout":
@@ -128,8 +142,11 @@ export async function run(argv: string[], io: IO): Promise<number> {
 type Options = {
   destination?: string;
   format?: string;
+  name?: string;
   folder?: string;
   expires?: string;
+  qr?: boolean;
+  png?: string;
   clipboard?: boolean;
   limit?: string;
   json?: boolean;
@@ -165,6 +182,11 @@ async function upload(files: string[], options: Options, io: IO, out: (t: string
   if (!options.clipboard && files.length === 0) throw new UsageError("Name at least one file to upload, or use --clipboard.");
   if (options.folder !== undefined && expires) throw new UsageError("--folder and --expires can't be combined.");
   if (options.clipboard && options.folder !== undefined) throw new UsageError("--folder only works with files.");
+  if (options.clipboard && options.name !== undefined) throw new UsageError("--name only works with files.");
+  if (options.name !== undefined && files.length !== 1) throw new UsageError("--name works with one file at a time.");
+  if (options.qr && options.json) throw new UsageError("--qr and --json can't be combined.");
+  if (options.png !== undefined) throw new UsageError("--png only works with aktar qr.");
+  const filename = options.name === undefined ? undefined : uploadName(options.name, files[0]);
 
   // Check the files before uploading anything, so a typo doesn't leave half a batch uploaded.
   for (const file of files) {
@@ -178,7 +200,8 @@ async function upload(files: string[], options: Options, io: IO, out: (t: string
 
   if (options.clipboard) {
     const uploaded = await aktar.uploadClipboard({ destinationId, expires });
-    print([uploaded], format, options, out);
+    if (options.json) out(JSON.stringify([uploaded], null, 2));
+    else show(uploaded, "clipboard", format, options, io, out, err);
     return EXIT.ok;
   }
 
@@ -188,6 +211,7 @@ async function upload(files: string[], options: Options, io: IO, out: (t: string
   for (const file of files) {
     try {
       const result = await aktar.uploadFile(file, {
+        filename,
         destinationId,
         prefix: options.folder,
         expires,
@@ -196,7 +220,7 @@ async function upload(files: string[], options: Options, io: IO, out: (t: string
       if (showProgress) io.stderr.write("\r\u001b[2K");
       uploaded.push(result);
       // Print as each one finishes, so a long batch shows links as it goes.
-      if (!options.json) out(result.formats[format] ?? result.url);
+      if (!options.json) show(result, file, format, options, io, out, err);
     } catch (error) {
       if (showProgress) io.stderr.write("\r\u001b[2K");
       // Can't reach Aktar at all: the rest would fail the same way.
@@ -209,10 +233,35 @@ async function upload(files: string[], options: Options, io: IO, out: (t: string
   return failures > 0 ? EXIT.failed : EXIT.ok;
 }
 
-function print(uploads: Upload[], format: OutputFormat, options: Options, out: (t: string) => void) {
-  if (options.json) out(JSON.stringify(uploads, null, 2));
-  else for (const upload of uploads) out(upload.formats[format] ?? upload.url);
+/** The name to upload `file` under: `--name` without slashes, with the file's extension unless it has one. */
+function uploadName(wanted: string, file: string): string {
+  const name = wanted.replace(/[/\\]/g, "").trim();
+  if (!name) throw new UsageError("--name needs a name.");
+  return path.extname(name) ? name : `${name}${path.extname(file)}`;
 }
+
+/** One upload in text mode: notes on stderr, so stdout stays just the links (and QR codes, if asked). */
+function show(
+  upload: Upload,
+  label: string,
+  format: OutputFormat,
+  options: Options,
+  io: IO,
+  out: (t: string) => void,
+  err: (t: string) => void,
+) {
+  if (upload.reused) err(`aktar: ${label}: already uploaded, reused the existing link`);
+  out(upload.formats[format] ?? upload.url);
+  if (!options.qr) return;
+  try {
+    // Always the link itself: a phone can't open Markdown or HTML.
+    out(qrText(encodeQR(upload.url), { color: useColor(io) }));
+  } catch (error) {
+    err(`aktar: ${label}: ${(error as Error).message}`);
+  }
+}
+
+const useColor = (io: IO) => Boolean(io.stdout.isTTY) && !io.env.NO_COLOR;
 
 async function findDestination(aktar: Client, wanted: string): Promise<Destination> {
   const all = await aktar.destinations();
@@ -224,6 +273,30 @@ async function findDestination(aktar: Client, wanted: string): Promise<Destinati
     throw new UsageError(`No destination named "${wanted}". Aktar has: ${names || "none yet"}.`);
   }
   return match;
+}
+
+// MARK: - qr
+
+async function qr(args: string[], options: Options, io: IO, out: (t: string) => void) {
+  if (args.length !== 1 || !args[0]) throw new UsageError("Pass one link, text or upload ID to aktar qr (quote text with spaces).");
+  if (options.png !== undefined && !options.png.trim()) throw new UsageError("--png needs a file name.");
+  let text = args[0];
+  if (UPLOAD_ID.test(text)) {
+    // Looks like an upload ID: show that upload's link.
+    const uploads = await (await client(options, io)).uploads({ limit: 1000 });
+    const match = uploads.find((upload) => upload.id.toLowerCase() === text.toLowerCase());
+    if (!match) throw new Error(`No upload with ID ${text} in Aktar's history.`);
+    text = match.url;
+    if (options.png === undefined) out(text);
+  }
+  const code = encodeQR(text);
+  if (options.png !== undefined) {
+    await writeFile(options.png, qrPNG(code));
+    out(`Saved to ${options.png}`);
+  } else {
+    out(qrText(code, { color: useColor(io) }));
+  }
+  return EXIT.ok;
 }
 
 // MARK: - login
