@@ -6,7 +6,7 @@ import { AktarError, Client, DEFAULT_PORT, type Destination, type OutputFormat, 
 import { configPath, loadConnection, parsePort, removeConnection, saveConnection } from "./config.js";
 import { encodeQR, qrPNG, qrText } from "./qr.js";
 
-export const VERSION = "0.2.0";
+export const VERSION = "0.3.0";
 
 /** What `run` talks to, so tests can pass their own. */
 export type IO = {
