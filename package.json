@@ -1,8 +1,9 @@
 {
   "name": "@getaktar/cli",
-  "version": "0.3.0",
-  "description": "Upload files to your own S3, R2 or B2 bucket from the terminal through the Aktar app, and get the link.",
-  "keywords": ["s3", "r2", "cloudflare-r2", "backblaze-b2", "minio", "upload", "cli", "typora", "aktar"],
+  "version": "0.4.0",
+  "mcpName": "io.github.getaktar/aktar",
+  "description": "Upload files to your own S3, R2 or B2 bucket from the terminal or an AI agent (MCP) through the Aktar app, and get the link.",
+  "keywords": ["s3", "r2", "cloudflare-r2", "backblaze-b2", "minio", "upload", "cli", "typora", "aktar", "mcp", "mcp-server", "ai-agents"],
   "homepage": "https://getaktar.com/cli/",
   "repository": {
     "type": "git",

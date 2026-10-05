@@ -1,0 +1,28 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.getaktar/aktar",
+  "title": "Aktar",
+  "description": "Upload files to your own S3, Cloudflare R2 or B2 bucket through the Aktar app and get links.",
+  "websiteUrl": "https://getaktar.com/cli/",
+  "repository": {
+    "url": "https://github.com/getaktar/cli",
+    "source": "github"
+  },
+  "version": "0.4.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "@getaktar/cli",
+      "version": "0.4.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "packageArguments": [
+        {
+          "type": "positional",
+          "value": "mcp"
+        }
+      ]
+    }
+  ]
+}
