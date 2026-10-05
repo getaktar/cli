@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { PassThrough } from "node:stream";
 import { after, before, describe, test } from "node:test";
-import { run, type IO } from "../src/run.js";
+import { run, VERSION, type IO } from "../src/run.js";
 
 // A stand-in for Aktar's local API: the same routes, auth and error shapes.
 const TOKEN = "test-token";
@@ -341,7 +341,7 @@ describe("listing", () => {
 
   test("--help and --version", async () => {
     assert.match((await cli(["--help"])).out, /aktar upload <file>/);
-    assert.equal((await cli(["--version"])).out, "0.2.0\n");
+    assert.equal((await cli(["--version"])).out, `${VERSION}\n`);
     assert.equal((await cli([])).code, 2);
   });
 });
