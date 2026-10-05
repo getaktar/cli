@@ -15,7 +15,7 @@
   "bin": {
     "aktar": "dist/src/cli.js"
   },
-  "files": ["dist/src", "README.md", "CHANGELOG.md", "LICENSE"],
+  "files": ["dist/src", "skills", "README.md", "CHANGELOG.md", "LICENSE"],
   "engines": {
     "node": ">=18"
   },

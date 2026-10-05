@@ -131,6 +131,63 @@ The link `aktar` prints is the one for the file as stored, after any conversion.
 | 2 | Bad arguments, or a file that doesn't exist (nothing was uploaded) |
 | 3 | Not logged in, Aktar isn't running, its local API is off, or the token is wrong |
 
+## AI agents (MCP and skill)
+
+### MCP server
+
+`aktar mcp` runs a [Model Context Protocol](https://modelcontextprotocol.io) server, so Claude, Cursor, VS Code, Codex and other agents can upload through Aktar, find past uploads and make links. Connect Aktar first (`aktar login`), then add it to your agent:
+
+```bash
+claude mcp add aktar -- aktar mcp            # Claude Code
+codex mcp add aktar -- aktar mcp             # Codex
+```
+
+For Claude Desktop, Cursor, VS Code and others that take a JSON config:
+
+```json
+{
+  "mcpServers": {
+    "aktar": { "command": "aktar", "args": ["mcp"] }
+  }
+}
+```
+
+Without a global install, use `"command": "npx", "args": ["-y", "@getaktar/cli", "mcp"]`.
+
+| Tool | What it does |
+|---|---|
+| `upload_file` | Upload a file (destination, name, folder, expiry optional) and return its link, Markdown and HTML |
+| `upload_clipboard` | Upload what's on the clipboard |
+| `replace_file` | Write a new file over an upload, keeping its link (Mac 0.14.0 / Windows 0.7.0) |
+| `search_uploads` | Search upload history |
+| `list_destinations` | Destinations and what file types each is used for |
+| `list_bucket` | Browse a bucket's folders and files |
+| `create_temporary_link` | A link that stops working after a while (presigned URL) |
+| `get_thumbnail` | A preview image of an upload (Mac 0.13.0 / Windows 0.6.0) |
+| `list_watched_folders` | Watched folders and their status |
+| `get_status` | Check the connection |
+| `delete_upload` | Delete an upload from its bucket (only with `--allow-delete`) |
+
+Uploading publishes a file, so keep an eye on what your agent sends. Your agent asks before calling a tool unless you allow it, and these options narrow what the server can do:
+
+- `--root <folder>`: only upload files from this folder (repeat for more). Paths are resolved, symlinks included, before they're checked.
+- `--read-only`: only the tools that change nothing (search, list, links, thumbnails).
+- `--allow-delete`: also offer `delete_upload`, which is left out by default.
+
+```bash
+claude mcp add aktar -- aktar mcp --root ~/Projects --root ~/Desktop
+```
+
+The server speaks both the current per-request protocol (2026-07-28) and the earlier `initialize` versions (2024-11-05 to 2025-11-25).
+
+### Agent skill
+
+Agents that use [skills](https://agentskills.io) but not MCP can use the CLI directly. `aktar skill` prints a `SKILL.md` that teaches them how:
+
+```bash
+mkdir -p ~/.claude/skills/aktar && aktar skill > ~/.claude/skills/aktar/SKILL.md
+```
+
 ## Typora
 
 In Typora, open **Settings > Image > Image Upload**, choose **Custom Command** and enter:

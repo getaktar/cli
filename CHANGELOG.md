@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `aktar mcp`: a Model Context Protocol server on stdio for AI agents
+  (Claude, Cursor, VS Code, Codex...), with tools to upload files or the
+  clipboard, replace a file keeping its link, search history, list
+  destinations, browse a bucket, make temporary links, show an upload's
+  thumbnail and list watched folders. `--root` limits uploads to folders,
+  `--read-only` offers only the tools that change nothing, and
+  `--allow-delete` adds `delete_upload`. Speaks the 2026-07-28 protocol and
+  the earlier `initialize` versions
+- `aktar skill`: prints an agent skill (`SKILL.md`) that teaches agents to
+  use the `aktar` command, for agents without MCP
+
 ## [0.3.0] - 2026-10-05
 
 ### Added

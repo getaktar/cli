@@ -30,6 +30,8 @@ export type Destination = {
   bucket: string;
   publicBaseURL: string;
   isDefault: boolean;
+  /** The file types and extensions an upload without a destination goes here for (Mac 0.14.0 / Windows 0.7.0). */
+  useFor?: { kinds: string[]; extensions: string[] } | null;
 };
 
 export type Upload = {
@@ -56,6 +58,32 @@ function withReused({ upload, reused }: UploadReply): Upload {
   return value === undefined ? upload : { ...upload, reused: value };
 }
 
+export type BucketListing = {
+  prefix: string;
+  folders: { prefix: string; name: string }[];
+  objects: { key: string; name: string; size: number; lastModified?: string | null; url?: string | null }[];
+  nextContinuationToken?: string | null;
+};
+
+export type TemporaryLink = { url: string; expiresAt: string };
+
+export type WatchedFolders = {
+  paused: boolean;
+  pausedUntil?: string | null;
+  folders: {
+    id: string;
+    name: string;
+    path: string;
+    enabled: boolean;
+    status: string;
+    destinationID?: string | null;
+    waiting: number;
+    uploading: number;
+    failed: number;
+    awaitingConfirmation: number;
+  }[];
+};
+
 export type ErrorKind =
   /** Nothing is listening: Aktar isn't running, or its local API is off. */
   | "not-running"
@@ -78,6 +106,7 @@ export class AktarError extends Error {
 type RequestOptions = {
   query?: Record<string, string | number | undefined>;
   file?: { path: string; onProgress?: (fraction: number) => void };
+  json?: unknown;
 };
 
 export class Client {
@@ -141,11 +170,49 @@ export class Client {
     return withReused(response);
   }
 
+  /** Deletes an upload's file from its bucket and the entry from history. */
+  deleteUpload(id: string) {
+    return this.request<{ deleted: string }>("DELETE", `uploads/${encodeURIComponent(id)}`);
+  }
+
+  /** An upload's thumbnail as PNG, or null when there's none (thumbnails off, or not a kind that has one). */
+  async uploadThumbnail(id: string, px = 512) {
+    const { body } = await this.send("GET", `uploads/${encodeURIComponent(id)}/thumbnail`, { query: { px } });
+    return body.length > 0 ? body : null;
+  }
+
+  /** One page of a bucket: the folders and files right under `prefix`. */
+  listObjects(destinationId: string, options: { prefix?: string; continuationToken?: string } = {}) {
+    return this.request<BucketListing>("GET", `destinations/${encodeURIComponent(destinationId)}/objects`, { query: options });
+  }
+
+  /** A presigned link to `key`, valid for `expiresIn` seconds (one minute to seven days). */
+  temporaryLink(destinationId: string, key: string, expiresIn: number) {
+    return this.request<TemporaryLink>("POST", `destinations/${encodeURIComponent(destinationId)}/links`, {
+      json: { key, expiresIn },
+    });
+  }
+
+  watchedFolders() {
+    return this.request<WatchedFolders>("GET", "watched-folders");
+  }
+
   async uploadClipboard(options: { destinationId?: string; expires?: number } = {}) {
     return withReused(await this.request<UploadReply>("POST", "uploads/clipboard", { query: options }));
   }
 
   private async request<T>(method: string, route: string, options: RequestOptions = {}): Promise<T> {
+    const { body } = await this.send(method, route, options);
+    try {
+      const text = body.toString("utf8");
+      return (text ? JSON.parse(text) : {}) as T;
+    } catch {
+      return {} as T;
+    }
+  }
+
+  /** The raw reply of a successful request; anything else becomes an AktarError. */
+  private async send(method: string, route: string, options: RequestOptions = {}): Promise<{ body: Buffer }> {
     const search = new URLSearchParams();
     for (const [key, value] of Object.entries(options.query ?? {})) {
       if (value !== undefined) search.set(key, String(value));
@@ -157,7 +224,11 @@ export class Client {
       Accept: "application/json",
     };
     let fileSize = 0;
-    if (options.file) {
+    const jsonBody = options.json === undefined ? undefined : Buffer.from(JSON.stringify(options.json), "utf8");
+    if (jsonBody) {
+      headers["Content-Type"] = "application/json";
+      headers["Content-Length"] = jsonBody.length;
+    } else if (options.file) {
       fileSize = (await stat(options.file.path)).size;
       headers["Content-Type"] = "application/octet-stream";
       headers["Content-Length"] = fileSize;
@@ -165,7 +236,7 @@ export class Client {
       headers["Content-Length"] = 0;
     }
 
-    return new Promise<T>((resolve, reject) => {
+    return new Promise<{ body: Buffer }>((resolve, reject) => {
       const req = http.request(
         {
           host: "127.0.0.1",
@@ -181,17 +252,17 @@ export class Client {
           const chunks: Buffer[] = [];
           res.on("data", (chunk: Buffer) => chunks.push(chunk));
           res.on("end", () => {
-            let payload: unknown = {};
-            try {
-              const text = Buffer.concat(chunks).toString("utf8");
-              payload = text ? JSON.parse(text) : {};
-            } catch {
-              // Not JSON; fall back to the status code below.
-            }
+            const body = Buffer.concat(chunks);
             const status = res.statusCode ?? 0;
             if (status >= 200 && status < 300) {
-              resolve(payload as T);
+              resolve({ body });
               return;
+            }
+            let payload: unknown = {};
+            try {
+              payload = JSON.parse(body.toString("utf8"));
+            } catch {
+              // Not JSON; fall back to the status code below.
             }
             const message = (payload as { error?: string }).error ?? `Aktar responded with HTTP ${status}.`;
             reject(new AktarError(status === 401 ? "unauthorized" : "request-failed", message, status));
@@ -211,7 +282,9 @@ export class Client {
         }
       });
 
-      if (options.file) {
+      if (jsonBody) {
+        req.end(jsonBody);
+      } else if (options.file) {
         const { onProgress } = options.file;
         const stream = createReadStream(options.file.path);
         let sent = 0;

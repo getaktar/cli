@@ -1,9 +1,10 @@
-import { access, writeFile } from "node:fs/promises";
+import { access, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { createInterface } from "node:readline";
 import { parseArgs } from "node:util";
 import { AktarError, Client, DEFAULT_PORT, type Destination, type OutputFormat, type Upload } from "./api.js";
 import { configPath, loadConnection, parsePort, removeConnection, saveConnection } from "./config.js";
+import { serveMCP } from "./mcp.js";
 import { encodeQR, qrPNG, qrText } from "./qr.js";
 
 export const VERSION = "0.3.0";
@@ -38,6 +39,8 @@ Usage:
   aktar status                       Check the connection to Aktar
   aktar destinations                 List destinations
   aktar history [search]             List recent uploads
+  aktar mcp [options]                Run an MCP server on stdio, for AI agents (Claude, Cursor, VS Code...)
+  aktar skill                        Print the agent skill (SKILL.md) that teaches agents to use aktar
 
 Upload options:
   -d, --destination <name|id>  Destination to upload to (default: the one selected in Aktar)
@@ -50,6 +53,11 @@ Upload options:
 
 QR options:
       --png <file>             Save the QR code as a PNG instead of printing it
+
+MCP options:
+      --root <folder>          Only allow uploading files from this folder (repeat for more)
+      --read-only              Only offer tools that change nothing (search, list, links, thumbnails)
+      --allow-delete           Also offer delete_upload
 
 Other options:
   -n, --limit <n>              Uploads to list with history (default 20)
@@ -83,6 +91,9 @@ export async function run(argv: string[], io: IO): Promise<number> {
         json: { type: "boolean" },
         token: { type: "string" },
         port: { type: "string" },
+        root: { type: "string", multiple: true },
+        "read-only": { type: "boolean" },
+        "allow-delete": { type: "boolean" },
         help: { type: "boolean", short: "h" },
         version: { type: "boolean", short: "v" },
       },
@@ -124,6 +135,12 @@ export async function run(argv: string[], io: IO): Promise<number> {
         return await destinations(options, io, out);
       case "history":
         return await history(args, options, io, out);
+      case "mcp":
+        return await mcp(args, options, io);
+      case "skill":
+        if (args.length > 0) throw new UsageError("aktar skill takes no arguments.");
+        io.stdout.write(await readFile(new URL("../../skills/aktar/SKILL.md", import.meta.url), "utf8"));
+        return EXIT.ok;
       default:
         throw new UsageError(`Unknown command "${command}".`);
     }
@@ -156,6 +173,9 @@ type Options = {
   json?: boolean;
   token?: string;
   port?: string;
+  root?: string[];
+  "read-only"?: boolean;
+  "allow-delete"?: boolean;
 };
 
 class NotConnectedError extends AktarError {}
@@ -330,6 +350,31 @@ async function findDestination(aktar: Client, wanted: string): Promise<Destinati
     throw new UsageError(`No destination named "${wanted}". Aktar has: ${names || "none yet"}.`);
   }
   return match;
+}
+
+// MARK: - mcp
+
+/** Serves MCP on stdin/stdout until the agent closes it; nothing else may write to stdout meanwhile. */
+async function mcp(args: string[], options: Options, io: IO) {
+  if (args.length > 0) throw new UsageError("aktar mcp takes no arguments.");
+  const port = parsePort(options.port);
+  if (Number.isNaN(port)) throw new UsageError("--port must be a number between 1 and 65535.");
+  const roots = options.root ?? [];
+  if (roots.some((root) => !root.trim())) throw new UsageError("--root needs a folder.");
+  if (options["read-only"] && options["allow-delete"]) throw new UsageError("--read-only and --allow-delete can't be combined.");
+  for (const root of roots) {
+    await access(root).catch(() => {
+      throw new UsageError(`No such folder: ${root}`);
+    });
+  }
+  await serveMCP(io, {
+    version: VERSION,
+    port,
+    roots,
+    readOnly: Boolean(options["read-only"]),
+    allowDelete: Boolean(options["allow-delete"]),
+  });
+  return EXIT.ok;
 }
 
 // MARK: - qr
