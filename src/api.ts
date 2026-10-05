@@ -121,6 +121,26 @@ export class Client {
     return withReused(response);
   }
 
+  /**
+   * Writes `filePath` over an upload in history, keeping its key and link
+   * (Aktar for Mac 0.14.0 / Windows 0.7.0 or later).
+   */
+  async replaceUpload(id: string, filePath: string, onProgress?: (fraction: number) => void) {
+    const response = await this.request<UploadReply>("POST", `uploads/${encodeURIComponent(id)}/replace`, {
+      file: { path: filePath, onProgress },
+    });
+    return withReused(response);
+  }
+
+  /** Writes `filePath` over the object at `key`, which keeps its link. */
+  async replaceObject(destinationId: string, key: string, filePath: string, onProgress?: (fraction: number) => void) {
+    const response = await this.request<UploadReply>("PUT", `destinations/${encodeURIComponent(destinationId)}/objects`, {
+      query: { key },
+      file: { path: filePath, onProgress },
+    });
+    return withReused(response);
+  }
+
   async uploadClipboard(options: { destinationId?: string; expires?: number } = {}) {
     return withReused(await this.request<UploadReply>("POST", "uploads/clipboard", { query: options }));
   }

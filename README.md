@@ -63,6 +63,8 @@ aktar upload photo.jpg --json               # full details as JSON
 aktar status                                # which Aktar and destination you're connected to
 aktar destinations                          # list destinations (* marks the selected one)
 aktar history invoice -n 5                  # search recent uploads
+aktar replace 0B6C2F8E-3D1A-4C55-9E2B-7A41D0C3E9F1 v2.png  # new file, same link
+aktar replace docs/guide.pdf guide.pdf -d Docs  # replace a key in a destination's bucket
 aktar qr https://example.com                # a QR code of any link or text
 aktar qr 0B6C2F8E-3D1A-4C55-9E2B-7A41D0C3E9F1  # a QR code of an upload in history
 ```

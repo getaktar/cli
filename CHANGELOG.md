@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `aktar replace <target> <file>`: writes a new file over an upload, so its
+  key and link stay the same. `<target>` is an upload ID or link from
+  `aktar history`, or a key in a destination's bucket with `-d` (the
+  selected destination when left out). Prints the link like `aktar upload`,
+  with `--format`, `--json` and `--qr`. Needs Aktar for Mac 0.14.0 or
+  Aktar for Windows 0.7.0
+
 ## [0.2.0] - 2026-10-01
 
 ### Added

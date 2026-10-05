@@ -30,6 +30,8 @@ const HELP = `aktar ${VERSION}: upload files to your own storage through the Akt
 Usage:
   aktar upload <file>... [options]   Upload files and print their links
   aktar upload --clipboard           Upload the file or image on the clipboard
+  aktar replace <target> <file>      Replace an upload's file and keep its link; <target> is an
+                                     upload ID or link from history, or a key with -d
   aktar qr <link|text|upload-id>     Show a QR code (an upload ID from history shows its link)
   aktar login [--token <token>]      Save the token from Aktar's Settings > Integrations
   aktar logout                       Forget the saved token
@@ -106,6 +108,8 @@ export async function run(argv: string[], io: IO): Promise<number> {
     switch (command) {
       case "upload":
         return await upload(args, options, io, out, err);
+      case "replace":
+        return await replace(args, options, io, out);
       case "qr":
         return await qr(args, options, io, out);
       case "login":
@@ -231,6 +235,59 @@ async function upload(files: string[], options: Options, io: IO, out: (t: string
   }
   if (options.json) out(JSON.stringify(uploaded, null, 2));
   return failures > 0 ? EXIT.failed : EXIT.ok;
+}
+
+// MARK: - replace
+
+/**
+ * `target` is an upload ID or a link from history (replaced through that
+ * entry, so history follows), or otherwise a key in the bucket of `-d` (the
+ * selected destination when left out).
+ */
+async function replace(args: string[], options: Options, io: IO, out: (t: string) => void) {
+  if (args.length !== 2 || !args[0] || !args[1]) throw new UsageError("Pass what to replace and the new file: aktar replace <target> <file>.");
+  if (options.folder !== undefined || options.expires !== undefined || options.name !== undefined || options.clipboard) {
+    throw new UsageError("aktar replace keeps the key, so --folder, --expires, --name and --clipboard don't apply.");
+  }
+  if (options.qr && options.json) throw new UsageError("--qr and --json can't be combined.");
+  const format = (options.format ?? "url") as OutputFormat;
+  if (!FORMATS.includes(format)) throw new UsageError(`--format must be one of ${FORMATS.join(", ")}.`);
+  const [target, file] = args;
+  await access(file).catch(() => {
+    throw new UsageError(`No such file: ${file}`);
+  });
+
+  const aktar = await client(options, io);
+  const showProgress = !options.json && Boolean(io.stderr.isTTY);
+  const onProgress = showProgress ? (fraction: number) => io.stderr.write(`\r${file}  ${Math.round(fraction * 100)}%`) : undefined;
+  let replaced: Upload;
+  try {
+    if (UPLOAD_ID.test(target) || /^https?:\/\//i.test(target)) {
+      const uploads = await aktar.uploads({ limit: 1000 });
+      const match = uploads.find((upload) =>
+        UPLOAD_ID.test(target) ? upload.id.toLowerCase() === target.toLowerCase() : upload.url === target,
+      );
+      if (!match) {
+        throw new UsageError(
+          UPLOAD_ID.test(target)
+            ? `No upload with ID ${target} in Aktar's history.`
+            : `No upload with that link in Aktar's history. Pass its key with -d <destination> instead.`,
+        );
+      }
+      replaced = await aktar.replaceUpload(match.id, file, onProgress);
+    } else {
+      const destinationId = options.destination
+        ? (await findDestination(aktar, options.destination)).id
+        : (await aktar.status()).defaultDestinationId;
+      if (!destinationId) throw new UsageError("Aktar has no destination yet.");
+      replaced = await aktar.replaceObject(destinationId, target.replace(/^\/+/, ""), file, onProgress);
+    }
+  } finally {
+    if (showProgress) io.stderr.write("\r\u001b[2K");
+  }
+  if (options.json) out(JSON.stringify(replaced, null, 2));
+  else show({ ...replaced, reused: false }, file, format, options, io, out, () => {});
+  return EXIT.ok;
 }
 
 /** The name to upload `file` under: `--name` without slashes, with the file's extension unless it has one. */

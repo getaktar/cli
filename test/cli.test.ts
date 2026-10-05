@@ -60,6 +60,10 @@ const server = http.createServer((req, res) => {
       return send(201, { upload: { ...upload, reused: false } });
     }
     if (req.method === "POST" && url.pathname === "/v1/uploads/clipboard") return send(201, { upload: uploadFor("clipboard.png") });
+    if (req.method === "POST" && url.pathname === `/v1/uploads/${OLD_ID}/replace`) return send(200, { upload: { ...uploadFor("old.png"), id: OLD_ID } });
+    if (req.method === "PUT" && url.pathname === "/v1/destinations/D2/objects") {
+      return send(200, { upload: uploadFor(url.searchParams.get("key") ?? "", "D2") });
+    }
     send(404, { error: "Not found." });
   });
 });
@@ -339,5 +343,33 @@ describe("listing", () => {
     assert.match((await cli(["--help"])).out, /aktar upload <file>/);
     assert.equal((await cli(["--version"])).out, "0.2.0\n");
     assert.equal((await cli([])).code, 2);
+  });
+});
+
+describe("replace", () => {
+  test("replaces an upload from history by ID or link", async () => {
+    received.length = 0;
+    const byId = await cli(["replace", OLD_ID, path.join(dir, "a.png")], loggedIn());
+    assert.equal(byId.code, 0);
+    assert.match(byId.out, /old\.png/);
+    const call = received.find((request) => request.url === `/v1/uploads/${OLD_ID}/replace`);
+    assert.equal(call?.bytes, 3);
+    const byLink = await cli(["replace", uploadFor("old.png").url, path.join(dir, "a.png")], loggedIn());
+    assert.equal(byLink.code, 0);
+  });
+
+  test("replaces a key in a destination's bucket", async () => {
+    received.length = 0;
+    const result = await cli(["replace", "/docs/a.png", path.join(dir, "a.png"), "-d", "D2", "--json"], loggedIn());
+    assert.equal(result.code, 0);
+    assert.ok(received.some((request) => request.url === "/v1/destinations/D2/objects?key=docs%2Fa.png"));
+    assert.equal(JSON.parse(result.out).id, uploadFor("docs/a.png", "D2").id);
+  });
+
+  test("rejects bad usage", async () => {
+    assert.equal((await cli(["replace", OLD_ID], loggedIn())).code, 2);
+    assert.equal((await cli(["replace", OLD_ID, path.join(dir, "missing.png")], loggedIn())).code, 2);
+    assert.equal((await cli(["replace", OLD_ID, path.join(dir, "a.png"), "--expires", "7"], loggedIn())).code, 2);
+    assert.equal((await cli(["replace", "https://cdn.example.com/nope.png", path.join(dir, "a.png")], loggedIn())).code, 2);
   });
 });
