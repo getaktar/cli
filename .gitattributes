@@ -1,0 +1,2 @@
+# The agent skill is printed as is by aktar skill: keep LF everywhere.
+skills/** text eol=lf

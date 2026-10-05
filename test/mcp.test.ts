@@ -283,6 +283,6 @@ describe("skill", () => {
     stdout.on("data", (chunk) => (text += chunk));
     const code = await run(["skill"], { stdout, stderr: new PassThrough(), stdin: new PassThrough(), env: {} });
     assert.equal(code, 0);
-    assert.match(text, /^---\nname: aktar\n/);
+    assert.match(text, /^---\r?\nname: aktar\r?\n/);
   });
 });
