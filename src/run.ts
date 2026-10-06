@@ -7,7 +7,7 @@ import { configPath, loadConnection, parsePort, removeConnection, saveConnection
 import { serveMCP } from "./mcp.js";
 import { encodeQR, qrPNG, qrText } from "./qr.js";
 
-export const VERSION = "0.4.0";
+export const VERSION = "0.5.0";
 
 /** What `run` talks to, so tests can pass their own. */
 export type IO = {
