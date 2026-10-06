@@ -48,14 +48,45 @@ export type Upload = {
   formats: Record<OutputFormat, string>;
   /** Nothing was uploaded: the same file was already there, so Aktar reused its link. */
   reused?: boolean;
+  /** The upload's active short link. `formats` already use it. Older apps and Windows leave it out; the client makes that null. */
+  shortUrl?: string | null;
+  /** Only right after an upload: Aktar tried to make a short link and couldn't, so the links are the original ones. */
+  shortLinkError?: string;
 };
 
-/** Mac puts `reused` in the upload, Windows next to it. */
-type UploadReply = { upload: Upload; reused?: boolean };
+export type ShortLink = {
+  id: string;
+  shortUrl: string;
+  targetUrl: string;
+  provider: string;
+  providerName: string;
+  status: "active" | "expired" | "deleted" | "orphaned" | "unknown";
+  createdAt: string;
+  expiresAt: string | null;
+  /** Null when the provider has no stats. */
+  clicks: number | null;
+  lastClickAt: string | null;
+};
 
-function withReused({ upload, reused }: UploadReply): Upload {
+/** What happened to an object's short link when it was moved. */
+export type ShortLinkStatus = "none" | "updated" | "orphaned" | "notUpdated";
+
+/** Mac puts `reused` in the upload, Windows next to it. `shortLinkError` may come either way too. */
+type UploadReply = { upload: Upload; reused?: boolean; shortLinkError?: string };
+
+function withReused({ upload, reused, shortLinkError }: UploadReply): Upload {
   const value = upload.reused ?? reused;
-  return value === undefined ? upload : { ...upload, reused: value };
+  const error = upload.shortLinkError ?? shortLinkError;
+  return withShortUrl({
+    ...upload,
+    ...(value === undefined ? {} : { reused: value }),
+    ...(error === undefined ? {} : { shortLinkError: error }),
+  });
+}
+
+/** Every upload has `shortUrl`, null when there's no short link (or the app doesn't know them). */
+function withShortUrl(upload: Upload): Upload {
+  return { ...upload, shortUrl: upload.shortUrl ?? null };
 }
 
 export type BucketListing = {
@@ -109,6 +140,11 @@ type RequestOptions = {
   json?: unknown;
 };
 
+/** `short=1` forces a short link, `short=0` skips it, nothing lets the destination decide. */
+function shortQuery(short: boolean | undefined) {
+  return short === undefined ? undefined : short ? 1 : 0;
+}
+
 export class Client {
   constructor(readonly connection: Connection) {}
 
@@ -121,7 +157,7 @@ export class Client {
   }
 
   async uploads(query: { query?: string; destinationId?: string; limit?: number } = {}) {
-    return (await this.request<{ uploads: Upload[] }>("GET", "uploads", { query })).uploads;
+    return (await this.request<{ uploads: Upload[] }>("GET", "uploads", { query })).uploads.map(withShortUrl);
   }
 
   /**
@@ -130,7 +166,8 @@ export class Client {
    * name inside that folder. `filename` (the file's own by default) is the
    * name Aktar goes by: {filename} and {ext} in the template, and history.
    * `expires` is in days; leaving it out keeps the file, whatever Aktar's
-   * menu bar is set to.
+   * menu bar is set to. `short` makes a short link (true) or doesn't
+   * (false); left out, the destination's setting decides.
    */
   async uploadFile(
     filePath: string,
@@ -139,12 +176,13 @@ export class Client {
       destinationId?: string;
       prefix?: string;
       expires?: number;
+      short?: boolean;
       onProgress?: (fraction: number) => void;
     } = {},
   ) {
-    const { onProgress, filename, ...query } = options;
+    const { onProgress, filename, short, ...query } = options;
     const response = await this.request<UploadReply>("POST", "uploads", {
-      query: { filename: filename ?? path.basename(filePath), ...query },
+      query: { filename: filename ?? path.basename(filePath), ...query, short: shortQuery(short) },
       file: { path: filePath, onProgress },
     });
     return withReused(response);
@@ -197,8 +235,23 @@ export class Client {
     return this.request<WatchedFolders>("GET", "watched-folders");
   }
 
-  async uploadClipboard(options: { destinationId?: string; expires?: number } = {}) {
-    return withReused(await this.request<UploadReply>("POST", "uploads/clipboard", { query: options }));
+  async uploadClipboard(options: { destinationId?: string; expires?: number; short?: boolean } = {}) {
+    const { short, ...query } = options;
+    return withReused(await this.request<UploadReply>("POST", "uploads/clipboard", { query: { ...query, short: shortQuery(short) } }));
+  }
+
+  /**
+   * Makes a short link for an upload with its destination's link
+   * shortener, or returns the one it already has.
+   */
+  async createShortLink(id: string) {
+    const response = await this.request<{ shortLink: ShortLink; upload: Upload }>("POST", `uploads/${encodeURIComponent(id)}/short-link`);
+    return { shortLink: response.shortLink, upload: withShortUrl(response.upload) };
+  }
+
+  /** An upload's short link, with clicks when the provider counts them, or null when it has none. */
+  async shortLink(id: string) {
+    return (await this.request<{ shortLink: ShortLink | null }>("GET", `uploads/${encodeURIComponent(id)}/short-link`)).shortLink ?? null;
   }
 
   private async request<T>(method: string, route: string, options: RequestOptions = {}): Promise<T> {

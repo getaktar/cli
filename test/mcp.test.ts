@@ -11,6 +11,7 @@ import { run, VERSION, type IO } from "../src/run.js";
 // A stand-in for Aktar's local API, with just what the MCP tools call.
 const TOKEN = "test-token";
 const UPLOAD_ID = "0B6C2F8E-3D1A-4C55-9E2B-7A41D0C3E9F1";
+const SHORT_URL = "https://s.example.com/x7Kp2";
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
 const received: { method: string; url: string; body: string }[] = [];
 
@@ -51,9 +52,16 @@ const server = http.createServer((req, res) => {
           ],
         });
       case "GET /v1/uploads":
-        return send(200, { uploads: [upload("notes.txt")] });
+        return send(200, { uploads: [upload("notes.txt"), { ...upload("linked.txt"), id: "6F1E0D2C-8B7A-4E3D-9C1B-0A2F4E6D8C1A", shortUrl: SHORT_URL }] });
       case "POST /v1/uploads":
         return send(201, { upload: { ...upload(url.searchParams.get("filename") ?? ""), reused: false } });
+      case `POST /v1/uploads/${UPLOAD_ID}/short-link`: {
+        const target = upload("notes.txt");
+        return send(201, {
+          shortLink: { id: "L1", shortUrl: SHORT_URL, targetUrl: target.url, provider: "shlink", providerName: "Shlink", status: "active", createdAt: "2026-10-06T12:00:00Z", expiresAt: null, clicks: null, lastClickAt: null },
+          upload: { ...target, shortUrl: SHORT_URL },
+        });
+      }
       case `POST /v1/uploads/${UPLOAD_ID}/replace`:
         return send(200, { upload: upload("notes.txt") });
       case `DELETE /v1/uploads/${UPLOAD_ID}`:
@@ -164,7 +172,7 @@ describe("tools/list", () => {
     const tools = replies.get(1)!.result.tools;
     assert.deepEqual(
       tools.map((tool: { name: string }) => tool.name),
-      ["get_status", "list_destinations", "search_uploads", "upload_file", "upload_clipboard", "replace_file", "list_bucket", "create_temporary_link", "get_thumbnail", "list_watched_folders"],
+      ["get_status", "list_destinations", "search_uploads", "upload_file", "upload_clipboard", "replace_file", "create_short_link", "list_bucket", "create_temporary_link", "get_thumbnail", "list_watched_folders"],
     );
     for (const tool of tools) {
       assert.equal(tool.inputSchema.type, "object");
@@ -176,6 +184,7 @@ describe("tools/list", () => {
   test("--read-only leaves out what writes, --allow-delete adds delete_upload", async () => {
     const readOnly = await names(["--read-only"]);
     assert.ok(!readOnly.includes("upload_file") && !readOnly.includes("replace_file") && !readOnly.includes("upload_clipboard"));
+    assert.ok(!readOnly.includes("create_short_link"));
     assert.ok(readOnly.includes("search_uploads"));
     assert.ok((await names(["--allow-delete"])).includes("delete_upload"));
   });
@@ -196,6 +205,23 @@ describe("tools/call", () => {
     assert.ok(sent);
     assert.equal(sent.body, "abc");
     assert.equal(new URL(sent.url, "http://x").searchParams.get("destinationId"), "D2");
+  });
+
+  test("upload_file passes short, and its result always has shortUrl", async () => {
+    const file = path.join(dir, "shared", "notes.txt");
+    const sentShort = async (args: object) => {
+      received.length = 0;
+      const result = await toolResult("upload_file", { path: file, ...args });
+      assert.equal(result.isError, undefined);
+      assert.equal(result.structuredContent.upload.shortUrl, null);
+      const sent = received.find((request) => request.method === "POST");
+      assert.ok(sent);
+      return new URL(sent.url, "http://x").searchParams.get("short");
+    };
+    assert.equal(await sentShort({ short: true }), "1");
+    assert.equal(await sentShort({ short: false }), "0");
+    assert.equal(await sentShort({}), null);
+    assert.match((await toolResult("upload_file", { path: file, short: "yes" })).content[0].text, /short must be true or false/);
   });
 
   test("--root keeps uploads inside its folders, symlinks included", async () => {
@@ -235,6 +261,16 @@ describe("tools/call", () => {
     const result = await toolResult("search_uploads", { query: "notes", limit: 5 });
     assert.equal(result.structuredContent.uploads[0].url, "https://files.example.com/2026/10/notes.txt");
     assert.equal(result.structuredContent.uploads[0].formats, undefined);
+    assert.equal(result.structuredContent.uploads[0].shortUrl, null);
+    assert.equal(result.structuredContent.uploads[1].shortUrl, SHORT_URL);
+  });
+
+  test("create_short_link returns the short link and the upload", async () => {
+    const result = await toolResult("create_short_link", { id: UPLOAD_ID });
+    assert.equal(result.isError, undefined);
+    assert.equal(result.structuredContent.shortLink.shortUrl, SHORT_URL);
+    assert.equal(result.structuredContent.upload.shortUrl, SHORT_URL);
+    assert.match((await toolResult("create_short_link", { id: "nope" })).content[0].text, /upload ID/);
   });
 
   test("replace_file finds the upload by link", async () => {

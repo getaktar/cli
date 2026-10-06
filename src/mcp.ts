@@ -66,12 +66,18 @@ class ToolError extends Error {}
 const INSTRUCTIONS = `Aktar uploads files to the user's own S3-compatible storage (Cloudflare R2, Amazon S3, Backblaze B2, MinIO...) through the Aktar app on this computer, and returns links.
 - Uploading publishes a file: anyone with its link can open it, unless the destination copies temporary links. Only upload files the user asked to share.
 - Leave destination out unless the user names one: Aktar then picks it by file type (each destination's "Use for"), or uses the selected one.
-- An upload's result has the link in url, and ready-made Markdown and HTML in formats.
+- An upload's result has the link in url, and ready-made Markdown and HTML in formats. When it has a short link (shortUrl), formats use that.
 - To change a file someone already has the link to, use replace_file instead of uploading again.`;
 
 const destinationProperty = {
   type: "string",
   description: "Destination name or ID from list_destinations. Leave out to let Aktar choose.",
+};
+
+const shortProperty = {
+  type: "boolean",
+  description:
+    "true makes a short link with the destination's link shortener (even if its rules would skip this one), false makes none. Leave out to let the destination's setting decide.",
 };
 
 const TOOLS: Tool[] = [
@@ -135,6 +141,7 @@ const TOOLS: Tool[] = [
         name: { type: "string", description: "Upload under this name instead of the file's own (its extension is kept if this has none)." },
         folder: { type: "string", description: "Keep the file name and put it in this folder of the bucket, instead of the destination's path template." },
         expires: { type: "integer", enum: [0, 1, 7, 14, 30], description: "Delete after this many days (needs Aktar's auto-delete rules on the destination). 0 or left out keeps the file." },
+        short: shortProperty,
       },
       required: ["path"],
     },
@@ -153,6 +160,7 @@ const TOOLS: Tool[] = [
         destinationId: destination ? (await findDestination(aktar, destination)).id : undefined,
         prefix: folder,
         expires,
+        short: optionalBoolean(args, "short"),
       });
       return json({ upload: uploaded });
     },
@@ -166,6 +174,7 @@ const TOOLS: Tool[] = [
       properties: {
         destination: destinationProperty,
         expires: { type: "integer", enum: [0, 1, 7, 14, 30], description: "Delete after this many days. 0 or left out keeps the file." },
+        short: shortProperty,
       },
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
@@ -177,6 +186,7 @@ const TOOLS: Tool[] = [
       const uploaded = await aktar.uploadClipboard({
         destinationId: destination ? (await findDestination(aktar, destination)).id : undefined,
         expires,
+        short: optionalBoolean(args, "short"),
       });
       return json({ upload: uploaded });
     },
@@ -204,7 +214,7 @@ const TOOLS: Tool[] = [
       if (UPLOAD_ID.test(target) || /^https?:\/\//i.test(target)) {
         const uploads = await aktar.uploads({ limit: 1000 });
         const match = uploads.find((upload) =>
-          UPLOAD_ID.test(target) ? upload.id.toLowerCase() === target.toLowerCase() : upload.url === target,
+          UPLOAD_ID.test(target) ? upload.id.toLowerCase() === target.toLowerCase() : upload.url === target || upload.shortUrl === target,
         );
         if (!match) {
           throw new ToolError(
@@ -218,6 +228,23 @@ const TOOLS: Tool[] = [
       const destinationId = destination ? (await findDestination(aktar, destination)).id : (await aktar.status()).defaultDestinationId;
       if (!destinationId) throw new ToolError("Aktar has no destination yet.");
       return json({ upload: await aktar.replaceObject(destinationId, target.replace(/^\/+/, ""), file) });
+    },
+  },
+  {
+    name: "create_short_link",
+    title: "Create a short link",
+    description:
+      "Make a short link for an upload from search_uploads with its destination's link shortener, or return the one it already has. Returns the short link and the upload, whose formats then use it. Fails if the destination has no link shortener set up.",
+    inputSchema: {
+      type: "object",
+      properties: { id: { type: "string", description: "The upload's ID from search_uploads." } },
+      required: ["id"],
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    run: async (args, context) => {
+      const id = requiredString(args, "id");
+      if (!UPLOAD_ID.test(id)) throw new ToolError("id must be an upload ID from search_uploads.");
+      return json(await (await context.client()).createShortLink(id));
     },
   },
   {
@@ -458,8 +485,8 @@ function json(value: object): ToolResult {
 
 /** What search results show: enough to pick one and use its link, without every format of every upload. */
 function summary(upload: Upload) {
-  const { id, filename, url, objectKey, destinationName, mimeType, size, createdAt, expiresAt } = upload;
-  return { id, filename, url, objectKey, destinationName, mimeType, size, createdAt, expiresAt: expiresAt ?? null };
+  const { id, filename, url, shortUrl, objectKey, destinationName, mimeType, size, createdAt, expiresAt } = upload;
+  return { id, filename, url, shortUrl: shortUrl ?? null, objectKey, destinationName, mimeType, size, createdAt, expiresAt: expiresAt ?? null };
 }
 
 async function findDestination(aktar: Client, wanted: string): Promise<Destination> {
@@ -521,6 +548,13 @@ function optionalString(args: Args, key: string): string | undefined {
   if (value === undefined || value === null) return undefined;
   if (typeof value !== "string") throw new ToolError(`${key} must be a string.`);
   return value.trim() === "" ? undefined : value;
+}
+
+function optionalBoolean(args: Args, key: string): boolean | undefined {
+  const value = args[key];
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "boolean") throw new ToolError(`${key} must be true or false.`);
+  return value;
 }
 
 function optionalInteger(args: Args, key: string, min: number, max: number): number | undefined {

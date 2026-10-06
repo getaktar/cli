@@ -33,6 +33,7 @@ Usage:
   aktar upload --clipboard           Upload the file or image on the clipboard
   aktar replace <target> <file>      Replace an upload's file and keep its link; <target> is an
                                      upload ID or link from history, or a key with -d
+  aktar short <upload-id|link>       Make a short link for an upload from history, or show the one it has
   aktar qr <link|text|upload-id>     Show a QR code (an upload ID from history shows its link)
   aktar login [--token <token>]      Save the token from Aktar's Settings > Integrations
   aktar logout                       Forget the saved token
@@ -48,6 +49,8 @@ Upload options:
       --name <name>            Upload one file under this name (keeps its extension if <name> has none)
       --folder <path>          Keep the file name and upload into this folder
       --expires <days>         Delete after 1, 7, 14 or 30 days (needs Aktar's auto-delete rules)
+      --short                  Make a short link, even if the destination's rules would skip it
+      --no-short               Don't make a short link this time
       --qr                     Also print a QR code of each link
       --clipboard              Upload what's on the clipboard instead of files
 
@@ -85,6 +88,8 @@ export async function run(argv: string[], io: IO): Promise<number> {
         folder: { type: "string" },
         expires: { type: "string" },
         qr: { type: "boolean" },
+        short: { type: "boolean" },
+        "no-short": { type: "boolean" },
         png: { type: "string" },
         clipboard: { type: "boolean" },
         limit: { type: "string", short: "n" },
@@ -121,6 +126,8 @@ export async function run(argv: string[], io: IO): Promise<number> {
         return await upload(args, options, io, out, err);
       case "replace":
         return await replace(args, options, io, out);
+      case "short":
+        return await short(args, options, io, out);
       case "qr":
         return await qr(args, options, io, out);
       case "login":
@@ -167,6 +174,8 @@ type Options = {
   folder?: string;
   expires?: string;
   qr?: boolean;
+  short?: boolean;
+  "no-short"?: boolean;
   png?: string;
   clipboard?: boolean;
   limit?: string;
@@ -210,6 +219,8 @@ async function upload(files: string[], options: Options, io: IO, out: (t: string
   if (options.name !== undefined && files.length !== 1) throw new UsageError("--name works with one file at a time.");
   if (options.qr && options.json) throw new UsageError("--qr and --json can't be combined.");
   if (options.png !== undefined) throw new UsageError("--png only works with aktar qr.");
+  if (options.short && options["no-short"]) throw new UsageError("--short and --no-short can't be combined.");
+  const short = options.short ? true : options["no-short"] ? false : undefined;
   const filename = options.name === undefined ? undefined : uploadName(options.name, files[0]);
 
   // Check the files before uploading anything, so a typo doesn't leave half a batch uploaded.
@@ -223,7 +234,7 @@ async function upload(files: string[], options: Options, io: IO, out: (t: string
   const destinationId = options.destination ? (await findDestination(aktar, options.destination)).id : undefined;
 
   if (options.clipboard) {
-    const uploaded = await aktar.uploadClipboard({ destinationId, expires });
+    const uploaded = await aktar.uploadClipboard({ destinationId, expires, short });
     if (options.json) out(JSON.stringify([uploaded], null, 2));
     else show(uploaded, "clipboard", format, options, io, out, err);
     return EXIT.ok;
@@ -239,6 +250,7 @@ async function upload(files: string[], options: Options, io: IO, out: (t: string
         destinationId,
         prefix: options.folder,
         expires,
+        short,
         onProgress: showProgress ? (fraction) => io.stderr.write(`\r${file}  ${Math.round(fraction * 100)}%`) : undefined,
       });
       if (showProgress) io.stderr.write("\r\u001b[2K");
@@ -269,6 +281,7 @@ async function replace(args: string[], options: Options, io: IO, out: (t: string
   if (options.folder !== undefined || options.expires !== undefined || options.name !== undefined || options.clipboard) {
     throw new UsageError("aktar replace keeps the key, so --folder, --expires, --name and --clipboard don't apply.");
   }
+  if (options.short || options["no-short"]) throw new UsageError("--short and --no-short only work with aktar upload. Use aktar short for a short link.");
   if (options.qr && options.json) throw new UsageError("--qr and --json can't be combined.");
   const format = (options.format ?? "url") as OutputFormat;
   if (!FORMATS.includes(format)) throw new UsageError(`--format must be one of ${FORMATS.join(", ")}.`);
@@ -283,10 +296,7 @@ async function replace(args: string[], options: Options, io: IO, out: (t: string
   let replaced: Upload;
   try {
     if (UPLOAD_ID.test(target) || /^https?:\/\//i.test(target)) {
-      const uploads = await aktar.uploads({ limit: 1000 });
-      const match = uploads.find((upload) =>
-        UPLOAD_ID.test(target) ? upload.id.toLowerCase() === target.toLowerCase() : upload.url === target,
-      );
+      const match = await findUpload(aktar, target);
       if (!match) {
         throw new UsageError(
           UPLOAD_ID.test(target)
@@ -310,6 +320,13 @@ async function replace(args: string[], options: Options, io: IO, out: (t: string
   return EXIT.ok;
 }
 
+/** An upload in history by its ID, link or short link (the newest 1000). */
+async function findUpload(aktar: Client, target: string): Promise<Upload | undefined> {
+  const uploads = await aktar.uploads({ limit: 1000 });
+  if (UPLOAD_ID.test(target)) return uploads.find((upload) => upload.id.toLowerCase() === target.toLowerCase());
+  return uploads.find((upload) => upload.url === target || upload.shortUrl === target);
+}
+
 /** The name to upload `file` under: `--name` without slashes, with the file's extension unless it has one. */
 function uploadName(wanted: string, file: string): string {
   const name = wanted.replace(/[/\\]/g, "").trim();
@@ -328,11 +345,13 @@ function show(
   err: (t: string) => void,
 ) {
   if (upload.reused) err(`aktar: ${label}: already uploaded, reused the existing link`);
-  out(upload.formats[format] ?? upload.url);
+  if (upload.shortLinkError) err(`aktar: ${label}: couldn't make a short link, printed the original link: ${upload.shortLinkError}`);
+  // The app's formats already have the short link, when there's one.
+  out(upload.formats?.[format] ?? upload.shortUrl ?? upload.url);
   if (!options.qr) return;
   try {
     // Always the link itself: a phone can't open Markdown or HTML.
-    out(qrText(encodeQR(upload.url), { color: useColor(io) }));
+    out(qrText(encodeQR(upload.shortUrl ?? upload.url), { color: useColor(io) }));
   } catch (error) {
     err(`aktar: ${label}: ${(error as Error).message}`);
   }
@@ -350,6 +369,40 @@ async function findDestination(aktar: Client, wanted: string): Promise<Destinati
     throw new UsageError(`No destination named "${wanted}". Aktar has: ${names || "none yet"}.`);
   }
   return match;
+}
+
+// MARK: - short
+
+/** Makes a short link for an upload in history (or shows the one it has) and prints it. */
+async function short(args: string[], options: Options, io: IO, out: (t: string) => void) {
+  if (args.length !== 1 || !args[0]) throw new UsageError("Pass an upload ID or link from history: aktar short <upload-id|link>.");
+  if (options.qr && options.json) throw new UsageError("--qr and --json can't be combined.");
+  const [target] = args;
+  if (!UPLOAD_ID.test(target) && !/^https?:\/\//i.test(target)) {
+    throw new UsageError("Pass an upload ID or link from aktar history.");
+  }
+  const aktar = await client(options, io);
+  const match = await findUpload(aktar, target);
+  if (!match) {
+    throw new UsageError(UPLOAD_ID.test(target) ? `No upload with ID ${target} in Aktar's history.` : "No upload with that link in Aktar's history.");
+  }
+  let created;
+  try {
+    created = await aktar.createShortLink(match.id);
+  } catch (error) {
+    if (error instanceof AktarError && error.status === 404 && /^Not found/i.test(error.message)) {
+      throw new Error("This Aktar version doesn't make short links yet. Update Aktar and try again.");
+    }
+    throw error;
+  }
+  const { shortLink } = created;
+  if (options.json) {
+    out(JSON.stringify(shortLink, null, 2));
+    return EXIT.ok;
+  }
+  out(shortLink.shortUrl);
+  if (options.qr) out(qrText(encodeQR(shortLink.shortUrl), { color: useColor(io) }));
+  return EXIT.ok;
 }
 
 // MARK: - mcp
@@ -388,7 +441,7 @@ async function qr(args: string[], options: Options, io: IO, out: (t: string) => 
     const uploads = await (await client(options, io)).uploads({ limit: 1000 });
     const match = uploads.find((upload) => upload.id.toLowerCase() === text.toLowerCase());
     if (!match) throw new Error(`No upload with ID ${text} in Aktar's history.`);
-    text = match.url;
+    text = match.shortUrl ?? match.url;
     if (options.png === undefined) out(text);
   }
   const code = encodeQR(text);
@@ -486,6 +539,8 @@ async function history(args: string[], options: Options, io: IO, out: (t: string
     return EXIT.ok;
   }
   if (uploads.length === 0) out("No uploads found.");
-  for (const upload of uploads) out(`${upload.createdAt.slice(0, 10)}  ${upload.filename}  ${upload.url}`);
+  for (const upload of uploads) {
+    out(`${upload.createdAt.slice(0, 10)}  ${upload.filename}  ${upload.url}${upload.shortUrl ? `  ${upload.shortUrl}` : ""}`);
+  }
   return EXIT.ok;
 }

@@ -16,6 +16,33 @@ const destinations = [
 ];
 const received: { url: string; bytes: number }[] = [];
 const OLD_ID = "0B6C2F8E-3D1A-4C55-9E2B-7A41D0C3E9F1";
+const SHORT_ID = "6F1E0D2C-8B7A-4E3D-9C1B-0A2F4E6D8C1A";
+const BUILD_ID = "9A8B7C6D-5E4F-4A3B-8C2D-1E0F9A8B7C6D";
+const SHORT_URL = "https://s.example.com/x7Kp2";
+
+/** An upload whose short link `formats` already use, as the app sends it. */
+function shortened(upload: ReturnType<typeof uploadFor>) {
+  return {
+    ...upload,
+    shortUrl: SHORT_URL,
+    formats: { url: SHORT_URL, markdown: `![${upload.filename}](${SHORT_URL})`, html: `<img src="${SHORT_URL}" alt="">`, custom: `[${upload.filename}](${SHORT_URL})` },
+  };
+}
+
+function shortLinkFor(target: string) {
+  return {
+    id: "L1",
+    shortUrl: SHORT_URL,
+    targetUrl: target,
+    provider: "shlink",
+    providerName: "Shlink",
+    status: "active",
+    createdAt: "2026-10-06T12:00:00Z",
+    expiresAt: null,
+    clicks: 3,
+    lastClickAt: null,
+  };
+}
 
 function uploadFor(filename: string, destinationId = "D1") {
   const url = `https://shots.example.com/2026/09/${filename}`;
@@ -49,7 +76,26 @@ const server = http.createServer((req, res) => {
       return send(200, { app: "Aktar", version: "0.7.0", build: "10", apiVersion: 1, defaultDestinationId: "D1", outputFormat: "url" });
     }
     if (req.method === "GET" && url.pathname === "/v1/destinations") return send(200, { destinations });
-    if (req.method === "GET" && url.pathname === "/v1/uploads") return send(200, { uploads: [{ ...uploadFor("old.png"), id: OLD_ID }] });
+    if (req.method === "GET" && url.pathname === "/v1/uploads") {
+      return send(200, {
+        uploads: [
+          { ...uploadFor("old.png"), id: OLD_ID },
+          { ...shortened(uploadFor("linked.png")), id: SHORT_ID },
+          { ...uploadFor("build.zip", "D2"), id: BUILD_ID },
+        ],
+      });
+    }
+    if (req.method === "POST" && url.pathname === `/v1/uploads/${OLD_ID}/short-link`) {
+      const upload = { ...shortened(uploadFor("old.png")), id: OLD_ID };
+      return send(201, { shortLink: shortLinkFor(upload.url), upload });
+    }
+    if (req.method === "POST" && url.pathname === `/v1/uploads/${SHORT_ID}/short-link`) {
+      const upload = { ...shortened(uploadFor("linked.png")), id: SHORT_ID };
+      return send(200, { shortLink: shortLinkFor(upload.url), upload });
+    }
+    if (req.method === "POST" && url.pathname === `/v1/uploads/${BUILD_ID}/short-link`) {
+      return send(409, { error: "Builds has no link shortener set up." });
+    }
     if (req.method === "POST" && url.pathname === "/v1/uploads") {
       const filename = url.searchParams.get("filename") ?? "";
       if (filename === "broken.png") return send(502, { error: "The bucket said no." });
@@ -57,9 +103,16 @@ const server = http.createServer((req, res) => {
       // The Mac says `reused` in the upload, Windows next to it.
       if (filename === "same.png") return send(201, { upload: { ...upload, reused: true } });
       if (filename === "again.png") return send(201, { upload, reused: true });
+      if (url.searchParams.get("short") === "1") {
+        if (filename === "failed.png") return send(201, { upload: { ...upload, shortUrl: null }, shortLinkError: "Shlink said 503." });
+        return send(201, { upload: shortened(upload) });
+      }
       return send(201, { upload: { ...upload, reused: false } });
     }
-    if (req.method === "POST" && url.pathname === "/v1/uploads/clipboard") return send(201, { upload: uploadFor("clipboard.png") });
+    if (req.method === "POST" && url.pathname === "/v1/uploads/clipboard") {
+      const upload = uploadFor("clipboard.png");
+      return send(201, { upload: url.searchParams.get("short") === "1" ? shortened(upload) : upload });
+    }
     if (req.method === "POST" && url.pathname === `/v1/uploads/${OLD_ID}/replace`) return send(200, { upload: { ...uploadFor("old.png"), id: OLD_ID } });
     if (req.method === "PUT" && url.pathname === "/v1/destinations/D2/objects") {
       return send(200, { upload: uploadFor(url.searchParams.get("key") ?? "", "D2") });
@@ -80,6 +133,7 @@ before(async () => {
   await writeFile(path.join(dir, "broken.png"), "abc");
   await writeFile(path.join(dir, "same.png"), "abc");
   await writeFile(path.join(dir, "again.png"), "abc");
+  await writeFile(path.join(dir, "failed.png"), "abc");
 });
 
 after(() => server.close());
@@ -284,6 +338,99 @@ describe("QR codes", () => {
     assert.equal((await cli(["qr"])).code, 2);
     assert.equal((await cli(["qr", "a", "b"])).code, 2);
     assert.equal((await cli(["upload", path.join(dir, "a.png"), "--png", "x.png"], loggedIn())).code, 2);
+  });
+});
+
+describe("short links", () => {
+  const sentShort = async (args: string[]) => {
+    received.length = 0;
+    const result = await cli(["upload", ...args], loggedIn());
+    assert.equal(result.code, 0, result.err);
+    const upload = received.find((request) => request.url.startsWith("/v1/uploads?") || request.url.startsWith("/v1/uploads/clipboard"));
+    assert.ok(upload);
+    return new URL(upload.url, "http://x").searchParams.get("short");
+  };
+
+  test("--short and --no-short ask for one or none, for files and the clipboard", async () => {
+    assert.equal(await sentShort([path.join(dir, "a.png"), "--short"]), "1");
+    assert.equal(await sentShort([path.join(dir, "a.png"), "--no-short"]), "0");
+    assert.equal(await sentShort([path.join(dir, "a.png")]), null);
+    assert.equal(await sentShort(["--clipboard", "--short"]), "1");
+    assert.equal(await sentShort(["--clipboard", "--no-short"]), "0");
+  });
+
+  test("--short with --no-short is a usage error", async () => {
+    received.length = 0;
+    assert.equal((await cli(["upload", path.join(dir, "a.png"), "--short", "--no-short"], loggedIn())).code, 2);
+    assert.equal((await cli(["replace", OLD_ID, path.join(dir, "a.png"), "--short"], loggedIn())).code, 2);
+    assert.equal(received.length, 0);
+  });
+
+  test("prints the short link, in every format, and its QR code", async () => {
+    const file = path.join(dir, "a.png");
+    assert.equal((await cli(["upload", file, "--short"], loggedIn())).out, `${SHORT_URL}\n`);
+    assert.equal((await cli(["upload", file, "--short", "-f", "markdown"], loggedIn())).out, `![a.png](${SHORT_URL})\n`);
+    assert.equal((await cli(["upload", "--clipboard", "--short"], loggedIn())).out, `${SHORT_URL}\n`);
+    const [, ...code] = (await cli(["upload", file, "--short", "--qr"], loggedIn())).out.split("\n");
+    assert.equal(code.join("\n"), (await cli(["qr", SHORT_URL])).out);
+  });
+
+  test("--json always has shortUrl", async () => {
+    const plain = JSON.parse((await cli(["upload", path.join(dir, "a.png"), "--json"], loggedIn())).out);
+    assert.equal(plain[0].shortUrl, null);
+    const short = JSON.parse((await cli(["upload", path.join(dir, "a.png"), "--short", "--json"], loggedIn())).out);
+    assert.equal(short[0].shortUrl, SHORT_URL);
+    assert.equal(short[0].formats.markdown, `![a.png](${SHORT_URL})`);
+  });
+
+  test("a failed short link is noted on stderr, with the original link on stdout", async () => {
+    const result = await cli(["upload", path.join(dir, "failed.png"), "--short"], loggedIn());
+    assert.equal(result.code, 0);
+    assert.equal(result.out, "https://shots.example.com/2026/09/failed.png\n");
+    assert.match(result.err, /failed\.png: couldn't make a short link, printed the original link: Shlink said 503\.\n$/);
+  });
+
+  test("history shows short links, and --json always has shortUrl", async () => {
+    const text = await cli(["history"], loggedIn());
+    assert.match(text.out, new RegExp(`linked\\.png {2}https://shots\\.example\\.com/2026/09/linked\\.png {2}${SHORT_URL}$`, "m"));
+    assert.match(text.out, /old\.png {2}https:\/\/shots\.example\.com\/2026\/09\/old\.png$/m);
+    const json = JSON.parse((await cli(["history", "--json"], loggedIn())).out);
+    assert.deepEqual(
+      json.map((upload: { shortUrl: string | null }) => upload.shortUrl),
+      [null, SHORT_URL, null],
+    );
+  });
+
+  test("aktar short makes one, or shows the one there is", async () => {
+    received.length = 0;
+    const created = await cli(["short", OLD_ID], loggedIn());
+    assert.equal(created.code, 0, created.err);
+    assert.equal(created.out, `${SHORT_URL}\n`);
+    assert.ok(received.some((request) => request.url === `/v1/uploads/${OLD_ID}/short-link`));
+
+    const existing = await cli(["short", SHORT_URL, "--json"], loggedIn());
+    assert.equal(existing.code, 0, existing.err);
+    const shortLink = JSON.parse(existing.out);
+    assert.equal(shortLink.shortUrl, SHORT_URL);
+    assert.equal(shortLink.targetUrl, "https://shots.example.com/2026/09/linked.png");
+    assert.equal(shortLink.clicks, 3);
+
+    const byLink = await cli(["short", "https://shots.example.com/2026/09/old.png"], loggedIn());
+    assert.equal(byLink.out, `${SHORT_URL}\n`);
+  });
+
+  test("aktar short fails without a shortener or an upload", async () => {
+    const noShortener = await cli(["short", BUILD_ID], loggedIn());
+    assert.equal(noShortener.code, 1);
+    assert.match(noShortener.err, /no link shortener/);
+    assert.equal((await cli(["short", "11111111-2222-3333-4444-555555555555"], loggedIn())).code, 2);
+    assert.equal((await cli(["short", "notes.txt"], loggedIn())).code, 2);
+    assert.equal((await cli(["short"], loggedIn())).code, 2);
+  });
+
+  test("aktar qr with an upload ID uses its short link", async () => {
+    const [link] = (await cli(["qr", SHORT_ID], loggedIn())).out.split("\n");
+    assert.equal(link, SHORT_URL);
   });
 });
 
