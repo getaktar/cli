@@ -28,14 +28,20 @@ aktar upload <file> -d "<destination>"   # to a named destination
 aktar upload <file> --name cover         # under another name (extension kept)
 aktar upload <file> --folder docs/2026   # keep the name, into a bucket folder
 aktar upload <file> --expires 7          # delete after 1, 7, 14 or 30 days
+aktar upload <file> --short              # with a short link (--no-short: without)
 aktar upload --clipboard --json          # what's on the clipboard
 aktar replace <upload-id|link|key> <file> --json   # new contents, same link
 aktar history [search] -n 10 --json      # recent uploads, newest first
+aktar short <upload-id|link> --json      # a short link for an upload, or the one it has
 aktar destinations --json                # destinations ("isDefault" is the selected one)
 aktar qr <link|upload-id> --png qr.png   # a QR code of a link
 ```
 
-Each upload in the JSON has `url` (the link), `formats.markdown` and `formats.html` (ready to paste), `objectKey`, `id`, `expiresAt`, and `reused: true` when the same file was already uploaded and its existing link was returned.
+Each upload in the JSON has `url` (the link), `shortUrl` (its short link, or null), `formats.markdown` and `formats.html` (ready to paste, with the short link when there is one), `objectKey`, `id`, `expiresAt`, and `reused: true` when the same file was already uploaded and its existing link was returned. `shortLinkError` means the short link couldn't be made and the original link was used.
+
+## Short links
+
+Destinations with a link shortener set up in Aktar shorten links by their own rules; leave `--short` out unless the user asks for a short link. `--short` fails if the destination has no shortener. To give the user a link, prefer `shortUrl` when it isn't null.
 
 ## Choosing a destination
 

@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Short links, with the link shortener set up on a destination in Aktar:
+  `aktar upload --short` makes one even if the destination's rules would
+  skip it, `--no-short` makes none. The printed link, every `--format` and
+  the `--qr` code use the short link. If Aktar can't make it, the original
+  link is printed and stderr says why
+- `aktar short <upload-id|link>`: makes a short link for an upload in
+  history (or prints the one it has), with `--json` and `--qr`
+- `shortUrl` in `aktar upload --json` and `aktar history --json` (null when
+  there's none), and short links in `aktar history`. `aktar qr <upload-id>`
+  shows the short link when the upload has one, and `aktar replace` finds
+  uploads by their short link too
+- MCP: `upload_file` and `upload_clipboard` take `short`, `search_uploads`
+  and upload results have `shortUrl`, and the new `create_short_link` tool
+  makes a short link for an upload (left out with `--read-only`)
+
 ## [0.4.0] - 2026-10-06
 
 ### Added

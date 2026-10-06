@@ -58,6 +58,7 @@ aktar upload IMG_4021.jpg --name cover      # upload as cover.jpg
 aktar upload log.txt --expires 7            # delete after 7 days
 aktar upload --clipboard                    # the file or image on the clipboard
 aktar upload demo.mp4 --qr                  # the link and a QR code to open it on your phone
+aktar upload talk.pdf --short               # a short link from the destination's link shortener
 aktar upload photo.jpg --json               # full details as JSON
 
 aktar status                                # which Aktar and destination you're connected to
@@ -67,6 +68,7 @@ aktar replace 0B6C2F8E-3D1A-4C55-9E2B-7A41D0C3E9F1 v2.png  # new file, same link
 aktar replace docs/guide.pdf guide.pdf -d Docs  # replace a key in a destination's bucket
 aktar qr https://example.com                # a QR code of any link or text
 aktar qr 0B6C2F8E-3D1A-4C55-9E2B-7A41D0C3E9F1  # a QR code of an upload in history
+aktar short 0B6C2F8E-3D1A-4C55-9E2B-7A41D0C3E9F1  # a short link for an upload in history
 ```
 
 Without `-d`, files go to the destination selected in Aktar's menu bar. Uploads show up in Aktar's history like any other.
@@ -77,11 +79,24 @@ Without `-d`, files go to the destination selected in Aktar's menu bar. Uploads 
 
 If the same file (same contents, destination and expiry) is already in the bucket, Aktar doesn't upload it again and gives you the existing link. `aktar` prints the link as usual and notes it on stderr (`aktar: photo.jpg: already uploaded, reused the existing link`), so scripts reading stdout still get one link per file. This needs Aktar for Mac 0.10.0 or Windows 0.3.0.
 
+### Short links
+
+If a destination has a link shortener set up in Aktar (Shlink, YOURLS, Kutt, Dub, Short.io or your own), Aktar shortens its links following that destination's rules, and `aktar` prints the short link. `--format` uses it too: the Markdown, HTML and custom formats come from Aktar with the short link in them.
+
+- `--short` makes a short link for this upload even if the destination's "Only shorten links longer than" rule would skip it. It fails if the destination has no link shortener.
+- `--no-short` makes none this time.
+
+If Aktar can't make the short link (the shortener is down, say), the upload still goes through: `aktar` prints the original link and notes it on stderr (`aktar: talk.pdf: couldn't make a short link, printed the original link: ...`).
+
+`aktar short <upload-id|link>` makes a short link for an upload already in history, found by its ID, link or short link, and prints it. If it already has one, that's the one printed. `--json` prints the short link's details (provider, status, clicks when the shortener counts them), `--qr` adds its QR code. `aktar history` shows each upload's short link after its link.
+
+Older versions of Aktar, and Aktar for Windows until it has short links, ignore `--short` and `--no-short`.
+
 ### QR codes
 
-`aktar upload --qr` prints a QR code under each link, so you can open it on your phone. The QR code is always of the link itself, whatever `--format` prints. It's drawn black on white in the terminal, whatever its theme; when the output isn't a terminal, or `NO_COLOR` is set, it's drawn without colors (light modules as blocks), which phone cameras read on a light or dark background. `--qr` can't be combined with `--json`.
+`aktar upload --qr` prints a QR code under each link, so you can open it on your phone. The QR code is always of the link itself (the short link, if there is one), whatever `--format` prints. It's drawn black on white in the terminal, whatever its theme; when the output isn't a terminal, or `NO_COLOR` is set, it's drawn without colors (light modules as blocks), which phone cameras read on a light or dark background. `--qr` can't be combined with `--json`.
 
-`aktar qr <text>` shows the QR code of any link or text; quote text with spaces. Given an upload ID from `aktar history --json`, it shows that upload's link and its QR code. `--png <file>` saves the QR code as a PNG instead:
+`aktar qr <text>` shows the QR code of any link or text; quote text with spaces. Given an upload ID from `aktar history --json`, it shows that upload's link (its short link, if it has one) and its QR code. `--png <file>` saves the QR code as a PNG instead:
 
 ```bash
 aktar qr https://files.example.com/2026/09/7f3c2a91.png --png link.png
@@ -108,6 +123,7 @@ The link `aktar` prints is the one for the file as stored, after any conversion.
     "filename": "photo.jpg",
     "objectKey": "2026/09/7f3c2a91.jpg",
     "url": "https://files.example.com/2026/09/7f3c2a91.jpg",
+    "shortUrl": null,
     "destinationId": "5D1A…",
     "destinationName": "Screenshots",
     "mimeType": "image/jpeg",
@@ -120,7 +136,7 @@ The link `aktar` prints is the one for the file as stored, after any conversion.
 ]
 ```
 
-`reused` is `true` when nothing was uploaded because the file was already there; older versions of Aktar leave it out.
+`reused` is `true` when nothing was uploaded because the file was already there; older versions of Aktar leave it out. `shortUrl` is the upload's short link, or `null` when it has none; `formats` already use it. When Aktar couldn't make the short link, `shortLinkError` says why. `aktar history --json` has `shortUrl` too.
 
 ### Exit codes
 
@@ -156,10 +172,11 @@ Without a global install, use `"command": "npx", "args": ["-y", "@getaktar/cli",
 
 | Tool | What it does |
 |---|---|
-| `upload_file` | Upload a file (destination, name, folder, expiry optional) and return its link, Markdown and HTML |
+| `upload_file` | Upload a file (destination, name, folder, expiry, short link optional) and return its link, Markdown and HTML |
 | `upload_clipboard` | Upload what's on the clipboard |
 | `replace_file` | Write a new file over an upload, keeping its link (Mac 0.14.0 / Windows 0.7.0) |
-| `search_uploads` | Search upload history |
+| `create_short_link` | A short link for an upload, from its destination's link shortener |
+| `search_uploads` | Search upload history (with each upload's short link) |
 | `list_destinations` | Destinations and what file types each is used for |
 | `list_bucket` | Browse a bucket's folders and files |
 | `create_temporary_link` | A link that stops working after a while (presigned URL) |
