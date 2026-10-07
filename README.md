@@ -33,7 +33,7 @@ brew install getaktar/tap/aktar-cli
 
 Or run it without installing: `npx @getaktar/cli upload file.png`.
 
-Requires Node.js 18 or later and Aktar for Mac 0.4.0 or later, or Aktar for Windows.
+Requires Node.js 18 or later and Aktar for Mac 0.18.0 or Aktar for Windows 0.11.0 or later (earlier versions of the CLI work with Aktar for Mac 0.4.0 and later).
 
 ## Connect to Aktar
 
@@ -45,7 +45,7 @@ Requires Node.js 18 or later and Aktar for Mac 0.4.0 or later, or Aktar for Wind
 aktar login
 ```
 
-and paste the token when asked. It's checked against Aktar and saved to `~/.config/aktar/cli.json` (`%APPDATA%\aktar\cli.json` on Windows), readable only by you. You can also pipe it in (`pbpaste | aktar login`) or set `AKTAR_TOKEN` (and `AKTAR_PORT` if you changed the port) instead.
+and paste the token when asked (avoid `aktar login --token <token>`: other programs can see command lines, and it stays in your shell history). It's checked against Aktar and saved to `~/.config/aktar/cli.json` (`%APPDATA%\aktar\cli.json` on Windows), readable only by you. You can also pipe it in (`pbpaste | aktar login`) or set `AKTAR_TOKEN` (and `AKTAR_PORT` if you changed the port) instead.
 
 ## Usage
 
@@ -145,17 +145,17 @@ The link `aktar` prints is the one for the file as stored, after any conversion.
 | 0 | Everything worked |
 | 1 | At least one upload or request failed (the others still went through) |
 | 2 | Bad arguments, or a file that doesn't exist (nothing was uploaded) |
-| 3 | Not logged in, Aktar isn't running, its local API is off, or the token is wrong |
+| 3 | Not logged in, Aktar isn't running, its local API is off, the token is wrong, or the app on the port couldn't prove it's Aktar (or is too old to) |
 
 ## AI agents (MCP and skill)
 
 ### MCP server
 
-`aktar mcp` runs a [Model Context Protocol](https://modelcontextprotocol.io) server, so Claude, Cursor, VS Code, Codex and other agents can upload through Aktar, find past uploads and make links. Connect Aktar first (`aktar login`), then add it to your agent:
+`aktar mcp` runs a [Model Context Protocol](https://modelcontextprotocol.io) server, so Claude, Cursor, VS Code, Codex and other agents can upload through Aktar, find past uploads and make links. Connect Aktar first (`aktar login`), then add it to your agent with the folder it may upload files from:
 
 ```bash
-claude mcp add aktar -- aktar mcp            # Claude Code
-codex mcp add aktar -- aktar mcp             # Codex
+claude mcp add aktar -- aktar mcp --root ~/Projects    # Claude Code
+codex mcp add aktar -- aktar mcp --root ~/Projects     # Codex
 ```
 
 For Claude Desktop, Cursor, VS Code and others that take a JSON config:
@@ -163,37 +163,43 @@ For Claude Desktop, Cursor, VS Code and others that take a JSON config:
 ```json
 {
   "mcpServers": {
-    "aktar": { "command": "aktar", "args": ["mcp"] }
+    "aktar": { "command": "aktar", "args": ["mcp", "--root", "/Users/you/Projects"] }
   }
 }
 ```
 
-Without a global install, use `"command": "npx", "args": ["-y", "@getaktar/cli", "mcp"]`.
+Without a global install, use `"command": "npx", "args": ["-y", "@getaktar/cli", "mcp", "--root", "/Users/you/Projects"]`.
 
 | Tool | What it does |
 |---|---|
 | `upload_file` | Upload a file (destination, name, folder, expiry, short link optional) and return its link, Markdown and HTML |
-| `upload_clipboard` | Upload what's on the clipboard |
-| `replace_file` | Write a new file over an upload, keeping its link (Mac 0.14.0 / Windows 0.7.0) |
+| `upload_clipboard` | Upload what's on the clipboard (left out with `--root`) |
+| `replace_file` | Write a new file over an upload or any file in a bucket, keeping its link (only with `--allow-replace` or `--allow-delete`; Mac 0.14.0 / Windows 0.7.0) |
 | `create_short_link` | A short link for an upload, from its destination's link shortener |
 | `search_uploads` | Search upload history (with each upload's short link) |
 | `list_destinations` | Destinations and what file types each is used for |
 | `list_bucket` | Browse a bucket's folders and files |
-| `create_temporary_link` | A link that stops working after a while (presigned URL) |
+| `create_temporary_link` | A link that stops working after a while (presigned URL). This gives access: anyone with the link can download the file until it expires, even from a private bucket. At most 60 minutes unless `--max-link-minutes` allows more |
 | `get_thumbnail` | A preview image of an upload (Mac 0.13.0 / Windows 0.6.0) |
 | `list_watched_folders` | Watched folders and their status |
 | `get_status` | Check the connection |
 | `delete_upload` | Delete an upload from its bucket (only with `--allow-delete`) |
 
-Uploading publishes a file, so keep an eye on what your agent sends. Your agent asks before calling a tool unless you allow it, and these options narrow what the server can do:
+Uploading publishes a file, so keep an eye on what your agent sends. Your agent asks before calling a tool unless you allow it, and the server limits what it can reach:
 
-- `--root <folder>`: only upload files from this folder (repeat for more). Paths are resolved, symlinks included, before they're checked.
-- `--read-only`: only the tools that change nothing (search, list, links, thumbnails).
-- `--allow-delete`: also offer `delete_upload`, which is left out by default.
+- `--root <folder>`: only upload files from this folder (repeat for more). Paths are resolved, symlinks included, before they're checked. Without `--root`, files come only from the folder the server runs in (agents usually start it in your project). If that's your home folder or the top of the disk, as some apps do, local files aren't uploaded at all until you add `--root`. `--root ~` or `--root /` allow more, if you really want that.
+- Secrets are never uploaded, wherever they are: SSH and private keys (`id_rsa`, `id_ed25519`, `*.pem`, `*.p12`, `*.pfx`...), `.env` files, `~/.ssh`, `~/.gnupg`, `~/.aws`, `~/.azure`, `~/.config/gcloud`, `~/.kube`, `~/.docker`, `~/.netrc`, `~/.npmrc`, `~/.pypirc`, `~/.git-credentials`, Aktar's own config, the Keychain, browser profiles and password databases (`*.kdbx`). Files with several hard links aren't uploaded either. To share one of these, upload it yourself with `aktar upload`.
+- `--read-only`: only the tools that change nothing in a bucket (search, list, temporary links, thumbnails).
+- `--allow-replace`: also offer `replace_file`, which overwrites files in a bucket. It's left out by default because the old contents are gone, like a delete.
+- `--allow-delete`: also offer `delete_upload` (and `replace_file`).
+- `--max-link-minutes <n>`: let `create_temporary_link` make links that work for up to `n` minutes (default 60, at most 10080, 7 days).
+- `--log <file>`: append each tool call (time, tool, arguments, result) to a file only you can read, to see later what an agent did.
 
 ```bash
-claude mcp add aktar -- aktar mcp --root ~/Projects --root ~/Desktop
+claude mcp add aktar -- aktar mcp --root ~/Projects --root ~/Desktop --allow-replace
 ```
+
+Tool results start with a note that file names, keys and messages inside come from files and buckets, so agents treat them as data rather than instructions; control and text-direction characters are removed from them.
 
 The server speaks both the current per-request protocol (2026-07-28) and the earlier `initialize` versions (2024-11-05 to 2025-11-25).
 
@@ -204,6 +210,10 @@ Agents that use [skills](https://agentskills.io) but not MCP can use the CLI dir
 ```bash
 mkdir -p ~/.claude/skills/aktar && aktar skill > ~/.claude/skills/aktar/SKILL.md
 ```
+
+### Checking it's Aktar
+
+Before sending the token, `aktar` asks the app on the port to prove it has the same token (without sending it), so if Aktar isn't running and another program is listening on its port, that program gets neither the token nor your files. This needs Aktar for Mac 0.18.0 or Aktar for Windows 0.11.0 or later; with an older Aktar, `aktar` stops and asks you to update.
 
 ## Typora
 

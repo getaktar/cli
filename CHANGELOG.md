@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Before sending the token, `aktar` now asks the app on the port to prove it
+  has the same token, so if Aktar isn't running and another program listens
+  on its port, it gets neither the token nor your files. Needs Aktar for Mac
+  0.18.0 or Aktar for Windows 0.11.0 or later; with an older Aktar, `aktar`
+  stops and asks you to update
+- `aktar mcp` only uploads files from `--root`, or else from the folder it
+  runs in. Started in your home folder or at the top of the disk without
+  `--root`, it uploads no local files and says to add `--root`
+- `aktar mcp` never uploads secrets, wherever they are: SSH and private keys,
+  `.env` files, cloud and package manager credentials, Aktar's own config,
+  the Keychain, browser profiles and password databases. Files with several
+  hard links are refused too
+- `replace_file` is no longer offered by default, since it overwrites a file
+  like a delete would: add `--allow-replace` (or `--allow-delete`)
+- `upload_clipboard` is left out when `--root` is given, since the clipboard
+  can hold anything
+- `create_temporary_link` makes links of at most 60 minutes; raise it with
+  `--max-link-minutes`
+- Tool results start with a note that file names, keys and messages in them
+  are data, not instructions, and lose control and text-direction characters
+- `aktar mcp` opens each file once and reads it from there, so it can't be
+  swapped for another file after it was checked. On Windows, network and
+  device paths (`\\host\share`) are refused before anything touches them
+- Text from Aktar (file names, links, errors) is printed without control
+  characters, so a crafted file name can't send escape sequences to your
+  terminal
+- `aktar login --token` warns that the token can be seen by other programs
+  and stays in your shell history
+
+### Added
+
+- `aktar mcp --log <file>` appends each tool call to a file, to see later
+  what an agent did
+- `aktar mcp` runs at most 4 tool calls at once
+
+### Changed
+
+- The MCP setup examples, the skill and the MCP Registry entry pass `--root`
+
 ## [0.5.0] - 2026-10-07
 
 ### Added

@@ -13,6 +13,7 @@ Run `aktar status --json`. If it fails:
 
 - `command not found`: the CLI isn't installed. Ask the user to run `npm install -g @getaktar/cli` (or `brew install getaktar/tap/aktar-cli`).
 - Exit code 3 / "Not connected" / "isn't running": the user needs to open Aktar, turn on Settings > Integrations > Allow local connections, and run `aktar login` themselves. Don't ask for the token in chat.
+- "couldn't prove it's Aktar" or "Update to Aktar for Mac 0.18.0...": the token wasn't sent. The user needs to update Aktar, or run `aktar login` again if its token changed.
 
 ## Uploading publishes the file
 
@@ -57,4 +58,4 @@ When the user wants to update a file that's already shared (a doc, a build, an i
 
 ## MCP
 
-If this agent supports MCP, the same features are available as tools with `aktar mcp` (see https://github.com/getaktar/cli#mcp-server).
+If this agent supports MCP, the same features are available as tools with `aktar mcp --root <folder>` (see https://github.com/getaktar/cli#mcp-server).

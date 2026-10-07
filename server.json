@@ -21,6 +21,15 @@
         {
           "type": "positional",
           "value": "mcp"
+        },
+        {
+          "type": "named",
+          "name": "--root",
+          "description": "Folder the agent may upload files from (repeat for more). Without it, the server's working directory; nothing when that's the home folder or the top of the disk.",
+          "valueHint": "folder",
+          "format": "filepath",
+          "isRequired": true,
+          "isRepeated": true
         }
       ]
     }
