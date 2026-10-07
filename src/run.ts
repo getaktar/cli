@@ -1,10 +1,11 @@
-import { access, readFile, writeFile } from "node:fs/promises";
+import { access, readFile, realpath, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { createInterface } from "node:readline";
 import { parseArgs } from "node:util";
 import { AktarError, Client, DEFAULT_PORT, type Destination, type OutputFormat, type Upload } from "./api.js";
 import { configPath, loadConnection, parsePort, removeConnection, saveConnection } from "./config.js";
-import { serveMCP } from "./mcp.js";
+import { DEFAULT_MAX_LINK_MINUTES, mcpRoots, serveMCP } from "./mcp.js";
 import { encodeQR, qrPNG, qrText } from "./qr.js";
 
 export const VERSION = "0.5.0";
@@ -58,9 +59,13 @@ QR options:
       --png <file>             Save the QR code as a PNG instead of printing it
 
 MCP options:
-      --root <folder>          Only allow uploading files from this folder (repeat for more)
-      --read-only              Only offer tools that change nothing (search, list, links, thumbnails)
-      --allow-delete           Also offer delete_upload
+      --root <folder>          Only upload files from this folder (repeat for more; default: the working
+                               directory, none when that's your home folder or the top of the disk)
+      --read-only              Only offer tools that change nothing in a bucket (search, list, links, thumbnails)
+      --allow-replace          Also offer replace_file, which overwrites files in a bucket
+      --allow-delete           Also offer delete_upload and replace_file
+      --max-link-minutes <n>   Longest temporary link create_temporary_link makes (default ${DEFAULT_MAX_LINK_MINUTES}, at most 10080)
+      --log <file>             Append each tool call to this file
 
 Other options:
   -n, --limit <n>              Uploads to list with history (default 20)
@@ -99,6 +104,9 @@ export async function run(argv: string[], io: IO): Promise<number> {
         root: { type: "string", multiple: true },
         "read-only": { type: "boolean" },
         "allow-delete": { type: "boolean" },
+        "allow-replace": { type: "boolean" },
+        "max-link-minutes": { type: "string" },
+        log: { type: "string" },
         help: { type: "boolean", short: "h" },
         version: { type: "boolean", short: "v" },
       },
@@ -185,6 +193,9 @@ type Options = {
   root?: string[];
   "read-only"?: boolean;
   "allow-delete"?: boolean;
+  "allow-replace"?: boolean;
+  "max-link-minutes"?: string;
+  log?: string;
 };
 
 class NotConnectedError extends AktarError {}
@@ -412,9 +423,18 @@ async function mcp(args: string[], options: Options, io: IO) {
   if (args.length > 0) throw new UsageError("aktar mcp takes no arguments.");
   const port = parsePort(options.port);
   if (Number.isNaN(port)) throw new UsageError("--port must be a number between 1 and 65535.");
-  const roots = options.root ?? [];
-  if (roots.some((root) => !root.trim())) throw new UsageError("--root needs a folder.");
+  const given = options.root ?? [];
+  if (given.some((root) => !root.trim())) throw new UsageError("--root needs a folder.");
   if (options["read-only"] && options["allow-delete"]) throw new UsageError("--read-only and --allow-delete can't be combined.");
+  if (options["read-only"] && options["allow-replace"]) throw new UsageError("--read-only and --allow-replace can't be combined.");
+  const maxLinkMinutes = options["max-link-minutes"] === undefined ? DEFAULT_MAX_LINK_MINUTES : Number(options["max-link-minutes"]);
+  if (!Number.isInteger(maxLinkMinutes) || maxLinkMinutes < 1 || maxLinkMinutes > 10080) {
+    throw new UsageError("--max-link-minutes must be a whole number from 1 to 10080 (7 days).");
+  }
+  if (options.log !== undefined && !options.log.trim()) throw new UsageError("--log needs a file name.");
+  const cwd = await realpath(process.cwd()).catch(() => process.cwd());
+  const home = await realpath(os.homedir()).catch(() => os.homedir());
+  const { roots, explicitRoots } = mcpRoots(given, cwd, home);
   for (const root of roots) {
     await access(root).catch(() => {
       throw new UsageError(`No such folder: ${root}`);
@@ -424,8 +444,12 @@ async function mcp(args: string[], options: Options, io: IO) {
     version: VERSION,
     port,
     roots,
+    explicitRoots,
     readOnly: Boolean(options["read-only"]),
     allowDelete: Boolean(options["allow-delete"]),
+    allowReplace: Boolean(options["allow-replace"]),
+    maxLinkMinutes,
+    log: options.log === undefined ? undefined : path.resolve(options.log),
   });
   return EXIT.ok;
 }
