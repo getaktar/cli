@@ -1,5 +1,6 @@
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { stat } from "node:fs/promises";
+import { stat, type FileHandle } from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
 
@@ -8,6 +9,17 @@ import path from "node:path";
 
 export const DEFAULT_PORT = 47913;
 const REQUEST_TIMEOUT_MS = 30_000;
+/** Bigger replies than any route sends; past this, something else is answering. */
+const MAX_RESPONSE_BYTES = 32 * 1024 * 1024;
+const HELLO_PREFIX = "aktar-hello-v1:";
+
+/** The app proves it has the token before the client sends it (Aktar for Mac 0.18.0 / Windows 0.11.0). */
+export const OUTDATED_APP_MESSAGE =
+  "This version of Aktar can't prove it's Aktar before the token is sent, so the token wasn't sent. Update to Aktar for Mac 0.18.0 or Aktar for Windows 0.11.0 or later.";
+
+export function unverifiedMessage(port: number) {
+  return `The app on port ${port} couldn't prove it's Aktar, so the token wasn't sent. If Aktar is running, its token may have changed: run aktar login again.`;
+}
 
 export type Connection = { port: number; token: string };
 
@@ -120,6 +132,8 @@ export type ErrorKind =
   | "not-running"
   /** Aktar rejected the token. */
   | "unauthorized"
+  /** Whatever answers on the port couldn't prove it's Aktar (or has another token), so the token wasn't sent. */
+  | "unverified"
   /** Aktar answered with an error of its own (storage, validation...). */
   | "request-failed";
 
@@ -134,10 +148,21 @@ export class AktarError extends Error {
   }
 }
 
+/**
+ * A file to send: its path, or a file the caller already opened and
+ * checked, whose bytes are then read from that descriptor (never reopened
+ * by name). The caller closes the handle.
+ */
+export type FileSource = string | { path: string; handle: FileHandle };
+
+const sourcePath = (source: FileSource) => (typeof source === "string" ? source : source.path);
+
 type RequestOptions = {
   query?: Record<string, string | number | undefined>;
-  file?: { path: string; onProgress?: (fraction: number) => void };
+  file?: { source: FileSource; onProgress?: (fraction: number) => void };
   json?: unknown;
+  /** Sends no token: for /v1/hello. */
+  anonymous?: boolean;
 };
 
 /** `short=1` forces a short link, `short=0` skips it, nothing lets the destination decide. */
@@ -147,6 +172,44 @@ function shortQuery(short: boolean | undefined) {
 
 export class Client {
   constructor(readonly connection: Connection) {}
+
+  /** Settled once the app on the port proved it has the token; every request waits for it. */
+  private verified?: Promise<void>;
+
+  /**
+   * Asks the app to prove it has the token (an HMAC of a random nonce)
+   * before the token is sent, so another program squatting the port while
+   * Aktar isn't running never gets the token or any file.
+   */
+  verify(): Promise<void> {
+    if (!this.verified) {
+      const check = this.hello();
+      this.verified = check;
+      // A failed check is tried again next time (Aktar may have started meanwhile).
+      check.catch(() => {
+        if (this.verified === check) this.verified = undefined;
+      });
+    }
+    return this.verified;
+  }
+
+  private async hello() {
+    const nonce = randomBytes(32).toString("base64url");
+    let reply: { app?: unknown; proof?: unknown };
+    try {
+      reply = await this.request("GET", "hello", { query: { nonce }, anonymous: true });
+    } catch (error) {
+      if (error instanceof AktarError && error.kind !== "not-running" && error.status !== undefined) {
+        throw new AktarError("unverified", OUTDATED_APP_MESSAGE, error.status);
+      }
+      throw error;
+    }
+    const expected = createHmac("sha256", this.connection.token).update(`${HELLO_PREFIX}${nonce}`, "utf8").digest();
+    const proof = typeof reply.proof === "string" && /^[0-9a-f]{64}$/.test(reply.proof) ? Buffer.from(reply.proof, "hex") : undefined;
+    if (reply.app !== "Aktar" || !proof || !timingSafeEqual(proof, expected)) {
+      throw new AktarError("unverified", unverifiedMessage(this.connection.port));
+    }
+  }
 
   status() {
     return this.request<Status>("GET", "status");
@@ -170,7 +233,7 @@ export class Client {
    * (false); left out, the destination's setting decides.
    */
   async uploadFile(
-    filePath: string,
+    file: FileSource,
     options: {
       filename?: string;
       destinationId?: string;
@@ -182,8 +245,8 @@ export class Client {
   ) {
     const { onProgress, filename, short, ...query } = options;
     const response = await this.request<UploadReply>("POST", "uploads", {
-      query: { filename: filename ?? path.basename(filePath), ...query, short: shortQuery(short) },
-      file: { path: filePath, onProgress },
+      query: { filename: filename ?? path.basename(sourcePath(file)), ...query, short: shortQuery(short) },
+      file: { source: file, onProgress },
     });
     return withReused(response);
   }
@@ -192,18 +255,18 @@ export class Client {
    * Writes `filePath` over an upload in history, keeping its key and link
    * (Aktar for Mac 0.14.0 / Windows 0.7.0 or later).
    */
-  async replaceUpload(id: string, filePath: string, onProgress?: (fraction: number) => void) {
+  async replaceUpload(id: string, file: FileSource, onProgress?: (fraction: number) => void) {
     const response = await this.request<UploadReply>("POST", `uploads/${encodeURIComponent(id)}/replace`, {
-      file: { path: filePath, onProgress },
+      file: { source: file, onProgress },
     });
     return withReused(response);
   }
 
-  /** Writes `filePath` over the object at `key`, which keeps its link. */
-  async replaceObject(destinationId: string, key: string, filePath: string, onProgress?: (fraction: number) => void) {
+  /** Writes `file` over the object at `key`, which keeps its link. */
+  async replaceObject(destinationId: string, key: string, file: FileSource, onProgress?: (fraction: number) => void) {
     const response = await this.request<UploadReply>("PUT", `destinations/${encodeURIComponent(destinationId)}/objects`, {
       query: { key },
-      file: { path: filePath, onProgress },
+      file: { source: file, onProgress },
     });
     return withReused(response);
   }
@@ -266,23 +329,23 @@ export class Client {
 
   /** The raw reply of a successful request; anything else becomes an AktarError. */
   private async send(method: string, route: string, options: RequestOptions = {}): Promise<{ body: Buffer }> {
+    if (!options.anonymous) await this.verify();
     const search = new URLSearchParams();
     for (const [key, value] of Object.entries(options.query ?? {})) {
       if (value !== undefined) search.set(key, String(value));
     }
     const query = search.toString();
 
-    const headers: Record<string, string | number> = {
-      Authorization: `Bearer ${this.connection.token}`,
-      Accept: "application/json",
-    };
+    const headers: Record<string, string | number> = { Accept: "application/json" };
+    if (!options.anonymous) headers.Authorization = `Bearer ${this.connection.token}`;
     let fileSize = 0;
     const jsonBody = options.json === undefined ? undefined : Buffer.from(JSON.stringify(options.json), "utf8");
     if (jsonBody) {
       headers["Content-Type"] = "application/json";
       headers["Content-Length"] = jsonBody.length;
     } else if (options.file) {
-      fileSize = (await stat(options.file.path)).size;
+      const { source } = options.file;
+      fileSize = (typeof source === "string" ? await stat(source) : await source.handle.stat()).size;
       headers["Content-Type"] = "application/octet-stream";
       headers["Content-Length"] = fileSize;
     } else if (method !== "GET") {
@@ -303,7 +366,16 @@ export class Client {
         },
         (res) => {
           const chunks: Buffer[] = [];
-          res.on("data", (chunk: Buffer) => chunks.push(chunk));
+          let received = 0;
+          res.on("data", (chunk: Buffer) => {
+            received += chunk.length;
+            if (received > MAX_RESPONSE_BYTES) {
+              res.destroy();
+              reject(new AktarError("request-failed", "Aktar's reply was too big."));
+              return;
+            }
+            chunks.push(chunk);
+          });
           res.on("end", () => {
             const body = Buffer.concat(chunks);
             const status = res.statusCode ?? 0;
@@ -339,7 +411,10 @@ export class Client {
         req.end(jsonBody);
       } else if (options.file) {
         const { onProgress } = options.file;
-        const stream = createReadStream(options.file.path);
+        const { source } = options.file;
+        // A checked file is read from the descriptor that was checked, from its start.
+        const stream =
+          typeof source === "string" ? createReadStream(source) : source.handle.createReadStream({ start: 0, autoClose: false });
         let sent = 0;
         stream.on("data", (chunk) => {
           sent += chunk.length;

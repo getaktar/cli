@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHmac } from "node:crypto";
 import { mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
@@ -61,6 +62,11 @@ function uploadFor(filename: string, destinationId = "D1") {
   };
 }
 
+/** What Aktar answers on /v1/hello: proof that it has the token. */
+function hello(nonce: string | null, token = TOKEN) {
+  return { app: "Aktar", proof: createHmac("sha256", token).update(`aktar-hello-v1:${nonce}`).digest("hex") };
+}
+
 const server = http.createServer((req, res) => {
   const send = (status: number, body: unknown) => {
     res.writeHead(status, { "Content-Type": "application/json" });
@@ -69,6 +75,7 @@ const server = http.createServer((req, res) => {
   const chunks: Buffer[] = [];
   req.on("data", (chunk: Buffer) => chunks.push(chunk));
   req.on("end", () => {
+    if (req.method === "GET" && req.url?.startsWith("/v1/hello?")) return send(200, hello(new URL(req.url, "http://localhost").searchParams.get("nonce")));
     if (req.headers.authorization !== `Bearer ${TOKEN}`) return send(401, { error: "Missing or invalid API token." });
     const url = new URL(req.url ?? "/", "http://localhost");
     received.push({ url: req.url ?? "", bytes: Buffer.concat(chunks).length });
@@ -441,10 +448,66 @@ describe("connection", () => {
     assert.match(result.err, /aktar login/);
   });
 
-  test("a wrong token exits 3", async () => {
+  test("a wrong token exits 3, and isn't sent", async () => {
+    received.length = 0;
     const result = await cli(["status"], { AKTAR_TOKEN: "wrong", AKTAR_PORT: String(port) });
     assert.equal(result.code, 3);
-    assert.match(result.err, /Run aktar login again/);
+    assert.match(result.err, /couldn't prove it's Aktar, so the token wasn't sent/);
+    assert.match(result.err, /run aktar login again/i);
+    assert.equal(received.length, 0);
+  });
+
+  /** Runs `status` against a server that answers /v1/hello with `reply`, and returns what it got. */
+  async function againstImpostor(reply: (nonce: string | null) => { status: number; body: unknown }) {
+    const seen: { url: string; authorization?: string }[] = [];
+    const impostor = http.createServer((req, res) => {
+      seen.push({ url: req.url ?? "", authorization: req.headers.authorization });
+      const { status, body } = req.url?.startsWith("/v1/hello?")
+        ? reply(new URL(req.url, "http://localhost").searchParams.get("nonce"))
+        : { status: 200, body: { app: "Aktar", version: "9", build: "1", apiVersion: 1, defaultDestinationId: null, outputFormat: "url" } };
+      res.writeHead(status, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(body));
+    });
+    await new Promise<void>((resolve) => impostor.listen(0, "127.0.0.1", resolve));
+    try {
+      const result = await cli(["upload", path.join(dir, "a.png")], { AKTAR_TOKEN: TOKEN, AKTAR_PORT: String((impostor.address() as AddressInfo).port) });
+      return { result, seen };
+    } finally {
+      impostor.close();
+    }
+  }
+
+  test("never sends the token or a file to something that can't prove it's Aktar", async () => {
+    const wrongProof = await againstImpostor(() => ({ status: 200, body: { app: "Aktar", proof: "0".repeat(64) } }));
+    assert.equal(wrongProof.result.code, 3);
+    assert.match(wrongProof.result.err, /couldn't prove it's Aktar/);
+    assert.deepEqual(wrongProof.seen.map((request) => request.url.split("?")[0]), ["/v1/hello"]);
+    assert.equal(wrongProof.seen[0].authorization, undefined);
+    const nonce = new URL(wrongProof.seen[0].url, "http://x").searchParams.get("nonce") ?? "";
+    assert.match(nonce, /^[A-Za-z0-9_-]{43}$/);
+
+    // Another token's proof isn't enough either.
+    const otherToken = await againstImpostor((nonce) => ({ status: 200, body: hello(nonce, "other-token") }));
+    assert.equal(otherToken.result.code, 3);
+    assert.equal(otherToken.seen.length, 1);
+  });
+
+  test("an Aktar without /v1/hello gets no token and a hint to update", async () => {
+    for (const status of [404, 401]) {
+      const old = await againstImpostor(() => ({ status, body: { error: "Not found." } }));
+      assert.equal(old.result.code, 3);
+      assert.match(old.result.err, /Update to Aktar for Mac 0\.18\.0 or Aktar for Windows 0\.11\.0/);
+      assert.equal(old.seen.length, 1);
+      assert.equal(old.seen[0].authorization, undefined);
+    }
+  });
+
+  test("proves Aktar once per process, before the first request", async () => {
+    received.length = 0;
+    const result = await cli(["status"], loggedIn());
+    assert.equal(result.code, 0);
+    // received only logs authenticated requests: status and destinations, after one hello.
+    assert.equal(received.length, 2);
   });
 
   test("Aktar not running exits 3", async () => {

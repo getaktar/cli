@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHmac } from "node:crypto";
 import { mkdir, mkdtemp, symlink, writeFile } from "node:fs/promises";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
@@ -29,6 +30,11 @@ const upload = (filename: string) => ({
   formats: { url: "u", markdown: "m", html: "h", custom: "c" },
 });
 
+/** What Aktar answers on /v1/hello: proof that it has the token. */
+function hello(nonce: string | null, token = TOKEN) {
+  return { app: "Aktar", proof: createHmac("sha256", token).update(`aktar-hello-v1:${nonce}`).digest("hex") };
+}
+
 const server = http.createServer((req, res) => {
   const send = (status: number, body: unknown) => {
     res.writeHead(status, { "Content-Type": "application/json" });
@@ -37,6 +43,7 @@ const server = http.createServer((req, res) => {
   const chunks: Buffer[] = [];
   req.on("data", (chunk: Buffer) => chunks.push(chunk));
   req.on("end", () => {
+    if (req.method === "GET" && req.url?.startsWith("/v1/hello?")) return send(200, hello(new URL(req.url, "http://localhost").searchParams.get("nonce")));
     if (req.headers.authorization !== `Bearer ${TOKEN}`) return send(401, { error: "Missing or invalid API token." });
     const url = new URL(req.url ?? "/", "http://localhost");
     received.push({ method: req.method ?? "", url: req.url ?? "", body: Buffer.concat(chunks).toString("utf8") });
