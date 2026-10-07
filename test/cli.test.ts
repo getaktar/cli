@@ -89,6 +89,7 @@ const server = http.createServer((req, res) => {
           { ...uploadFor("old.png"), id: OLD_ID },
           { ...shortened(uploadFor("linked.png")), id: SHORT_ID },
           { ...uploadFor("build.zip", "D2"), id: BUILD_ID },
+          { ...uploadFor("\u001b]52;c;cm0gLXJm\u0007x.png"), id: "U-escape" },
         ],
       });
     }
@@ -404,7 +405,7 @@ describe("short links", () => {
     const json = JSON.parse((await cli(["history", "--json"], loggedIn())).out);
     assert.deepEqual(
       json.map((upload: { shortUrl: string | null }) => upload.shortUrl),
-      [null, SHORT_URL, null],
+      [null, SHORT_URL, null, null],
     );
   });
 
@@ -523,6 +524,10 @@ describe("connection", () => {
 
     const good = await cli(["login", "--port", String(port)], env, `${TOKEN}\n`);
     assert.equal(good.code, 0);
+    assert.equal(good.err, "");
+    const flag = await cli(["login", "--port", String(port), "--token", TOKEN], env);
+    assert.equal(flag.code, 0);
+    assert.match(flag.err, /warning: a token on the command line can be seen by other programs/);
     assert.match(good.out, /Connected to Aktar 0\.7\.0/);
     const file = process.platform === "win32" ? path.join(dir, "login", "aktar", "cli.json") : path.join(dir, "login", "aktar", "cli.json");
     assert.deepEqual(JSON.parse(await readFile(file, "utf8")), { token: TOKEN, port });
@@ -542,6 +547,12 @@ describe("listing", () => {
     const result = await cli(["destinations"], loggedIn());
     assert.match(result.out, /^\* Screenshots/m);
     assert.match(result.out, /^ {2}Builds/m);
+  });
+
+  test("text output drops control characters from what the app sends", async () => {
+    const result = await cli(["history"], loggedIn());
+    assert.doesNotMatch(result.out, /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/);
+    assert.match(result.out, /\?\]52;c;cm0gLXJm\?x\.png/);
   });
 
   test("history lists uploads", async () => {

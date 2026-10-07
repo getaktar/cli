@@ -161,16 +161,16 @@ export async function run(argv: string[], io: IO): Promise<number> {
     }
   } catch (error) {
     if (error instanceof UsageError) {
-      err(`aktar: ${error.message}`);
+      err(`aktar: ${plain(error.message)}`);
       err("Run aktar --help for usage.");
       return EXIT.usage;
     }
     if (error instanceof AktarError) {
-      err(`aktar: ${error.message}`);
+      err(`aktar: ${plain(error.message)}`);
       if (error.kind === "unauthorized") err("The token doesn't match Aktar's anymore. Run aktar login again.");
       return error.kind === "request-failed" ? EXIT.failed : EXIT.connection;
     }
-    err(`aktar: ${(error as Error).message}`);
+    err(`aktar: ${plain((error as Error).message)}`);
     return EXIT.failed;
   }
 }
@@ -273,7 +273,7 @@ async function upload(files: string[], options: Options, io: IO, out: (t: string
       // Can't reach Aktar at all: the rest would fail the same way.
       if (error instanceof AktarError && error.kind !== "request-failed") throw error;
       failures += 1;
-      err(`aktar: ${file}: ${(error as Error).message}`);
+      err(`aktar: ${file}: ${plain((error as Error).message)}`);
     }
   }
   if (options.json) out(JSON.stringify(uploaded, null, 2));
@@ -356,9 +356,9 @@ function show(
   err: (t: string) => void,
 ) {
   if (upload.reused) err(`aktar: ${label}: already uploaded, reused the existing link`);
-  if (upload.shortLinkError) err(`aktar: ${label}: couldn't make a short link, printed the original link: ${upload.shortLinkError}`);
-  // The app's formats already have the short link, when there's one.
-  out(upload.formats?.[format] ?? upload.shortUrl ?? upload.url);
+  if (upload.shortLinkError) err(`aktar: ${label}: couldn't make a short link, printed the original link: ${plain(upload.shortLinkError)}`);
+  // The app's formats already have the short link, when there's one. A custom one may span lines.
+  out(plain(upload.formats?.[format] ?? upload.shortUrl ?? upload.url, { lines: true }));
   if (!options.qr) return;
   try {
     // Always the link itself: a phone can't open Markdown or HTML.
@@ -369,6 +369,15 @@ function show(
 }
 
 const useColor = (io: IO) => Boolean(io.stdout.isTTY) && !io.env.NO_COLOR;
+
+/**
+ * Text from the app (file names, keys, links, errors) without control
+ * characters, so a crafted name can't send escape sequences to the
+ * terminal. `lines` keeps line breaks and tabs.
+ */
+export function plain(text: string, { lines = false } = {}): string {
+  return text.replace(lines ? /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g : /[\u0000-\u001f\u007f-\u009f]/g, "?");
+}
 
 async function findDestination(aktar: Client, wanted: string): Promise<Destination> {
   const all = await aktar.destinations();
@@ -411,7 +420,7 @@ async function short(args: string[], options: Options, io: IO, out: (t: string) 
     out(JSON.stringify(shortLink, null, 2));
     return EXIT.ok;
   }
-  out(shortLink.shortUrl);
+  out(plain(shortLink.shortUrl));
   if (options.qr) out(qrText(encodeQR(shortLink.shortUrl), { color: useColor(io) }));
   return EXIT.ok;
 }
@@ -466,7 +475,7 @@ async function qr(args: string[], options: Options, io: IO, out: (t: string) => 
     const match = uploads.find((upload) => upload.id.toLowerCase() === text.toLowerCase());
     if (!match) throw new Error(`No upload with ID ${text} in Aktar's history.`);
     text = match.shortUrl ?? match.url;
-    if (options.png === undefined) out(text);
+    if (options.png === undefined) out(plain(text));
   }
   const code = encodeQR(text);
   if (options.png !== undefined) {
@@ -484,7 +493,9 @@ async function login(options: Options, io: IO, out: (t: string) => void, err: (t
   const port = parsePort(options.port);
   if (Number.isNaN(port)) throw new UsageError("--port must be a number between 1 and 65535.");
   let token = options.token?.trim();
-  if (!token) {
+  if (token) {
+    err("aktar: warning: a token on the command line can be seen by other programs (ps) and stays in your shell history. Next time, run aktar login without --token and paste it, or pipe it in.");
+  } else {
     if (io.stdin.isTTY) {
       err("Copy the token from Aktar: Settings > Integrations (turn on Allow local connections first).");
       token = (await promptHidden("Token: ", io)).trim();
@@ -498,7 +509,7 @@ async function login(options: Options, io: IO, out: (t: string) => void, err: (t
   // Check it before saving, so a typo doesn't get stored.
   const info = await new Client(connection).status();
   const file = await saveConnection(connection, io.env);
-  out(`Connected to ${info.app} ${info.version}. Saved to ${file}`);
+  out(`Connected to ${plain(info.app)} ${plain(info.version)}. Saved to ${file}`);
   return EXIT.ok;
 }
 
@@ -533,8 +544,8 @@ async function status(options: Options, io: IO, out: (t: string) => void) {
     return EXIT.ok;
   }
   const selected = all.find((destination) => destination.id === info.defaultDestinationId);
-  out(`${info.app} ${info.version} (build ${info.build}) on port ${aktar.connection.port}`);
-  out(`Destination: ${selected ? `${selected.name} (${selected.providerName}, ${selected.bucket})` : "none"}`);
+  out(`${plain(info.app)} ${plain(info.version)} (build ${plain(info.build)}) on port ${aktar.connection.port}`);
+  out(`Destination: ${selected ? plain(`${selected.name} (${selected.providerName}, ${selected.bucket})`) : "none"}`);
   out(`Config: ${configPath(io.env)}`);
   return EXIT.ok;
 }
@@ -547,7 +558,7 @@ async function destinations(options: Options, io: IO, out: (t: string) => void) 
   }
   if (all.length === 0) out("No destinations yet. Add one in Aktar's Settings.");
   for (const destination of all) {
-    out(`${destination.isDefault ? "*" : " "} ${destination.name}  ${destination.providerName}  ${destination.bucket}  ${destination.id}`);
+    out(plain(`${destination.isDefault ? "*" : " "} ${destination.name}  ${destination.providerName}  ${destination.bucket}  ${destination.id}`));
   }
   return EXIT.ok;
 }
@@ -564,7 +575,7 @@ async function history(args: string[], options: Options, io: IO, out: (t: string
   }
   if (uploads.length === 0) out("No uploads found.");
   for (const upload of uploads) {
-    out(`${upload.createdAt.slice(0, 10)}  ${upload.filename}  ${upload.url}${upload.shortUrl ? `  ${upload.shortUrl}` : ""}`);
+    out(plain(`${upload.createdAt.slice(0, 10)}  ${upload.filename}  ${upload.url}${upload.shortUrl ? `  ${upload.shortUrl}` : ""}`));
   }
   return EXIT.ok;
 }
