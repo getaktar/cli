@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-08
+
 ### Security
 
 - Before sending the token, `aktar` now asks the app on the port to prove it
