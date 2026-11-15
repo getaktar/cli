@@ -12,6 +12,7 @@
   <a href="https://www.npmjs.com/package/@getaktar/cli"><img src="https://img.shields.io/npm/v/@getaktar/cli?color=125efe" alt="npm version"></a>
   <a href="https://github.com/getaktar/cli/actions/workflows/ci.yml"><img src="https://github.com/getaktar/cli/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://github.com/getaktar/cli/blob/main/LICENSE"><img src="https://img.shields.io/npm/l/@getaktar/cli?color=125efe" alt="MIT license"></a>
+  <a href="https://mcpservers.org/servers/getaktar/cli"><img src="https://mcpservers.org/badge.svg" alt="Listed on mcpservers.org"></a>
 </p>
 
 ![aktar upload in a terminal: links, Markdown and JSON output](https://raw.githubusercontent.com/getaktar/cli/main/docs/demo.png)
